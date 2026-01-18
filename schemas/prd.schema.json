@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/czaku/ralphy/schemas/prd.schema.json",
+  "title": "Ralphy PRD Schema",
+  "description": "Schema for Product Requirement Documents used by ralphy AI orchestration",
+  "type": "object",
+  "required": ["userStories"],
+  "properties": {
+    "branchName": {
+      "type": "string",
+      "description": "Git branch name for this PRD's work"
+    },
+    "phase": {
+      "type": ["string", "integer"],
+      "description": "Phase number or identifier"
+    },
+    "phaseName": {
+      "type": "string",
+      "description": "Human-readable phase name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Overall PRD description"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project identifier (snarktank/ralph compatibility)"
+    },
+    "referenceDocuments": {
+      "type": "object",
+      "description": "Map of reference document names to file paths",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "rules": {
+      "type": "object",
+      "description": "Map of rule names to file paths",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "mandatoryPolicies": {
+      "type": "object",
+      "description": "Map of policy names to policy descriptions",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "context": {
+      "type": "object",
+      "description": "Additional context for the PRD",
+      "properties": {
+        "problemStatement": {
+          "type": "string",
+          "description": "What problem does this PRD solve?"
+        },
+        "businessImpact": {
+          "type": "string",
+          "description": "Why does this matter to the business?"
+        },
+        "technicalContext": {
+          "type": "string",
+          "description": "Technical background and constraints"
+        }
+      }
+    },
+    "completionCriteria": {
+      "type": "object",
+      "description": "Commands to verify completion (e.g., build/test commands)",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "userStories": {
+      "type": "array",
+      "description": "List of user stories/tasks to complete",
+      "items": {
+        "$ref": "#/definitions/userStory"
+      },
+      "minItems": 1
+    }
+  },
+  "definitions": {
+    "userStory": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the story (e.g., 'TASK-1', 'BL-A.1')"
+        },
+        "title": {
+          "type": "string",
+          "description": "Short title describing the task"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of what needs to be done"
+        },
+        "passes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this story has been completed"
+        },
+        "priority": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Numeric priority (1=highest, 5=lowest)"
+            },
+            {
+              "type": "string",
+              "enum": ["critical", "high", "medium", "low"],
+              "description": "Named priority level"
+            }
+          ],
+          "description": "Task priority"
+        },
+        "parallel_group": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Execution group for parallel processing. Tasks with same group can run in parallel. Groups execute in ascending order."
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of story IDs that must complete before this one"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Target platforms (e.g., ['mobile', 'web', 'api'])"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Primary files to create or modify"
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Test requirements for this story"
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Criteria that must be met for story completion"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional notes or context"
+        },
+        "slice": {
+          "type": "string",
+          "description": "Feature slice or category this story belongs to"
+        }
+      }
+    }
+  }
+}

@@ -302,6 +302,7 @@ ${BOLD}GIT BRANCH OPTIONS:${RESET}
 ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --prd FILE          PRD file path (default: PRD.md)
   --yaml FILE         Use YAML task file instead of markdown
+  --json FILE         Use JSON PRD file (FitKind/snarktank format)
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
 
@@ -324,6 +325,7 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --branch-per-task --create-pr  # Feature branch workflow
   ./ralphy.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
   ./ralphy.sh --yaml tasks.yaml            # Use YAML task file
+  ./ralphy.sh --json prd.json              # Use JSON PRD file
   ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
 
 ${BOLD}PRD FORMATS:${RESET}
@@ -335,6 +337,22 @@ ${BOLD}PRD FORMATS:${RESET}
       - title: Task description
         completed: false
         parallel_group: 1  # Optional: tasks with same group run in parallel
+
+  JSON (prd.json) - FitKind/snarktank format:
+    {
+      "branchName": "feature/name",
+      "userStories": [
+        {
+          "id": "US-001",
+          "title": "Task description",
+          "passes": false,
+          "parallel_group": 0,    # Optional: execution order
+          "acceptanceCriteria": [], # Optional: passed to AI
+          "platforms": [],        # Optional: target platforms
+          "dependencies": []      # Optional: task dependencies
+        }
+      ]
+    }
 
   GitHub Issues:
     Uses open issues from the specified repository
@@ -441,6 +459,11 @@ parse_args() {
         PRD_SOURCE="yaml"
         shift 2
         ;;
+      --json)
+        PRD_FILE="${2:-prd.json}"
+        PRD_SOURCE="json"
+        shift 2
+        ;;
       --github)
         GITHUB_REPO="${2:-}"
         PRD_SOURCE="github"
@@ -510,6 +533,16 @@ check_requirements() {
       fi
       if ! command -v yq &>/dev/null; then
         log_error "yq is required for YAML parsing. Install from https://github.com/mikefarah/yq"
+        exit 1
+      fi
+      ;;
+    json)
+      if [[ ! -f "$PRD_FILE" ]]; then
+        log_error "$PRD_FILE not found in current directory"
+        exit 1
+      fi
+      if ! command -v jq &>/dev/null; then
+        log_error "jq is required for JSON parsing. Install from https://stedolan.github.io/jq/"
         exit 1
       fi
       ;;
@@ -709,6 +742,64 @@ get_tasks_in_group_yaml() {
 }
 
 # ============================================
+# TASK SOURCES - JSON PRD (FitKind format)
+# ============================================
+
+# Get all incomplete tasks from JSON PRD
+get_tasks_json() {
+  jq -r '.userStories[] | select(.passes != true) | .title' "$PRD_FILE" 2>/dev/null || true
+}
+
+# Get next task (highest priority incomplete)
+get_next_task_json() {
+  # Sort by parallel_group first, then by array order
+  jq -r '[.userStories[] | select(.passes != true)] | sort_by(.parallel_group // 0) | .[0].title // ""' "$PRD_FILE" 2>/dev/null | cut -c1-50 || echo ""
+}
+
+count_remaining_json() {
+  jq -r '[.userStories[] | select(.passes != true)] | length' "$PRD_FILE" 2>/dev/null || echo "0"
+}
+
+count_completed_json() {
+  jq -r '[.userStories[] | select(.passes == true)] | length' "$PRD_FILE" 2>/dev/null || echo "0"
+}
+
+mark_task_complete_json() {
+  local task=$1
+  # Use jq to update passes to true for matching title
+  local tmp_file=$(mktemp)
+  jq --arg title "$task" '(.userStories[] | select(.title == $title)).passes = true' "$PRD_FILE" > "$tmp_file" && mv "$tmp_file" "$PRD_FILE"
+}
+
+get_parallel_group_json() {
+  local task=$1
+  jq -r --arg title "$task" '.userStories[] | select(.title == $title) | .parallel_group // 0' "$PRD_FILE" 2>/dev/null || echo "0"
+}
+
+get_tasks_in_group_json() {
+  local group=$1
+  jq -r --argjson group "$group" '.userStories[] | select(.passes != true and (.parallel_group // 0) == $group) | .title' "$PRD_FILE" 2>/dev/null || true
+}
+
+# Get task details for enhanced prompts
+get_task_details_json() {
+  local task=$1
+  jq -r --arg title "$task" '
+    .userStories[] | select(.title == $title) |
+    "ID: \(.id)\nDescription: \(.description // "")\nPlatforms: \(.platforms // [] | join(", "))\nFiles: \(.files // [] | join(", "))\nAcceptance Criteria:\n\(.acceptanceCriteria // [] | map("  - " + .) | join("\n"))"
+  ' "$PRD_FILE" 2>/dev/null || echo ""
+}
+
+# Get PRD-level context (rules, policies)
+get_prd_context_json() {
+  jq -r '
+    "Branch: \(.branchName // "")\n" +
+    "Phase: \(.phase // "") - \(.phaseName // "")\n" +
+    (if .mandatoryPolicies then "Policies:\n" + (.mandatoryPolicies | to_entries | map("  - \(.key): \(.value)") | join("\n")) else "" end)
+  ' "$PRD_FILE" 2>/dev/null || echo ""
+}
+
+# ============================================
 # TASK SOURCES - GITHUB ISSUES
 # ============================================
 
@@ -765,6 +856,7 @@ get_next_task() {
   case "$PRD_SOURCE" in
     markdown) get_next_task_markdown ;;
     yaml) get_next_task_yaml ;;
+    json) get_next_task_json ;;
     github) get_next_task_github ;;
   esac
 }
@@ -773,6 +865,7 @@ get_all_tasks() {
   case "$PRD_SOURCE" in
     markdown) get_tasks_markdown ;;
     yaml) get_tasks_yaml ;;
+    json) get_tasks_json ;;
     github) get_tasks_github ;;
   esac
 }
@@ -781,6 +874,7 @@ count_remaining_tasks() {
   case "$PRD_SOURCE" in
     markdown) count_remaining_markdown ;;
     yaml) count_remaining_yaml ;;
+    json) count_remaining_json ;;
     github) count_remaining_github ;;
   esac
 }
@@ -789,6 +883,7 @@ count_completed_tasks() {
   case "$PRD_SOURCE" in
     markdown) count_completed_markdown ;;
     yaml) count_completed_yaml ;;
+    json) count_completed_json ;;
     github) count_completed_github ;;
   esac
 }
@@ -798,7 +893,45 @@ mark_task_complete() {
   case "$PRD_SOURCE" in
     markdown) mark_task_complete_markdown "$task" ;;
     yaml) mark_task_complete_yaml "$task" ;;
+    json) mark_task_complete_json "$task" ;;
     github) mark_task_complete_github "$task" ;;
+  esac
+}
+
+# Get parallel group for a task
+get_parallel_group() {
+  local task=$1
+  case "$PRD_SOURCE" in
+    yaml) get_parallel_group_yaml "$task" ;;
+    json) get_parallel_group_json "$task" ;;
+    *) echo "0" ;;  # markdown/github don't support parallel groups
+  esac
+}
+
+# Get all tasks in a specific parallel group
+get_tasks_in_group() {
+  local group=$1
+  case "$PRD_SOURCE" in
+    yaml) get_tasks_in_group_yaml "$group" ;;
+    json) get_tasks_in_group_json "$group" ;;
+    *) get_all_tasks ;;  # markdown/github return all tasks
+  esac
+}
+
+# Get detailed task info (for enhanced prompts)
+get_task_details() {
+  local task=$1
+  case "$PRD_SOURCE" in
+    json) get_task_details_json "$task" ;;
+    *) echo "" ;;  # other sources don't have structured details
+  esac
+}
+
+# Get PRD-level context
+get_prd_context() {
+  case "$PRD_SOURCE" in
+    json) get_prd_context_json ;;
+    *) echo "" ;;
   esac
 }
 
