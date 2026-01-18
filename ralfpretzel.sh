@@ -2,7 +2,7 @@
 
 # ============================================
 # Ralphy - Autonomous AI Coding Loop
-# Supports Claude Code, OpenCode, Codex, Cursor, and Qwen-Code
+# Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code and Factory Droid
 # Runs until PRD is complete
 # ============================================
 
@@ -12,12 +12,12 @@ set -euo pipefail
 # CONFIGURATION & DEFAULTS
 # ============================================
 
-VERSION="0.9.1"
+VERSION="0.9.2"
 
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, or qwen
+AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, or droid
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
 MAX_RETRIES=3
@@ -85,8 +85,10 @@ iteration=0
 retry_count=0
 declare -a parallel_pids=()
 declare -a task_branches=()
+declare -a integration_branches=()  # Track integration branches for cleanup on interrupt
 WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
+ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
 # ============================================
 # LOGGING SYSTEM
@@ -496,7 +498,7 @@ interactive_wizard() {
           while IFS= read -r custom_model; do
             echo "  $option_num) $custom_model (custom)"
             custom_model_array+=("$custom_model")
-            ((option_num++))
+            ((option_num++)) || true
           done <<< "$custom_models"
         fi
         
@@ -546,7 +548,7 @@ interactive_wizard() {
           while IFS= read -r custom_model; do
             echo "  $option_num) $custom_model (custom)"
             custom_model_array+=("$custom_model")
-            ((option_num++))
+            ((option_num++)) || true
           done <<< "$custom_models"
         fi
         
@@ -596,7 +598,7 @@ interactive_wizard() {
           while IFS= read -r custom_model; do
             echo "  $option_num) $custom_model (custom)"
             custom_model_array+=("$custom_model")
-            ((option_num++))
+            ((option_num++)) || true
           done <<< "$custom_models"
         fi
         
@@ -808,10 +810,11 @@ ${BOLD}INTERACTIVE MODE:${RESET}
 
 ${BOLD}AI ENGINE & MODEL:${RESET}
   --claude            Use Claude Code (default)
-  --opencode          Use OpenCode  
+  --opencode          Use OpenCode
   --cursor            Use Cursor agent
   --codex             Use Codex CLI
   --qwen              Use Qwen-Code
+  --droid             Use Factory Droid
   --model MODEL_ID    Specify model (e.g., claude-opus-4-20250514)
 
 ${BOLD}COMMON MODELS BY ENGINE:${RESET}
@@ -1132,6 +1135,10 @@ parse_args() {
         AI_ENGINE="qwen"
         shift
         ;;
+      --droid)
+        AI_ENGINE="droid"
+        shift
+        ;;
       --model)
         MODEL_ID="${2:-}"
         if [[ -z "$MODEL_ID" ]]; then
@@ -1331,11 +1338,18 @@ check_requirements() {
         exit 1
       fi
       ;;
+    droid)
+      if ! command -v droid &>/dev/null; then
+        log_error "Factory Droid CLI not found."
+        log_info "Install from: https://docs.factory.ai/cli/getting-started/quickstart"
+        exit 1
+      fi
+      ;;
     *)
       if ! command -v claude &>/dev/null; then
         log_error "Claude Code CLI not found."
         log_info "Install from: https://github.com/anthropics/claude-code"
-        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen"
+        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen, --droid"
         exit 1
       fi
       ;;
@@ -1429,10 +1443,18 @@ cleanup() {
   if [[ $exit_code -eq 130 ]]; then
     printf "\n"
     log_warn "Interrupted! Cleaned up."
-    
+
     # Show branches created if any
     if [[ -n "${task_branches[*]+"${task_branches[*]}"}" ]]; then
       log_info "Branches created: ${task_branches[*]}"
+    fi
+
+    # Show integration branches if any (for parallel group workflows)
+    if [[ -n "${integration_branches[*]+"${integration_branches[*]}"}" ]]; then
+      log_info "Integration branches: ${integration_branches[*]}"
+      if [[ -n "$ORIGINAL_BASE_BRANCH" ]]; then
+        log_info "To resume: merge integration branches into $ORIGINAL_BASE_BRANCH"
+      fi
     fi
   fi
 }
@@ -2159,6 +2181,12 @@ run_ai_command() {
       qwen_cmd="$qwen_cmd -p \"$prompt\" > \"$output_file\" 2>&1 &"
       eval "$qwen_cmd"
       ;;
+    droid)
+      # Droid: use exec with stream-json output and medium autonomy for development
+      droid exec --output-format stream-json \
+        --auto medium \
+        "$prompt" > "$output_file" 2>&1 &
+      ;;
     codex)
       CODEX_LAST_MESSAGE_FILE="${output_file}.last"
       rm -f "$CODEX_LAST_MESSAGE_FILE"
@@ -2259,6 +2287,27 @@ parse_ai_result() {
       if [[ -z "$response" ]]; then
         response="Task completed"
       fi
+      ;;
+    droid)
+      # Droid stream-json parsing
+      # Look for completion event which has the final result
+      local completion_line
+      completion_line=$(echo "$result" | grep '"type":"completion"' | tail -1)
+
+      if [[ -n "$completion_line" ]]; then
+        response=$(echo "$completion_line" | jq -r '.finalText // "Task completed"' 2>/dev/null || echo "Task completed")
+        # Droid provides duration_ms in completion event
+        local dur_ms
+        dur_ms=$(echo "$completion_line" | jq -r '.durationMs // 0' 2>/dev/null || echo "0")
+        if [[ "$dur_ms" =~ ^[0-9]+$ ]] && [[ "$dur_ms" -gt 0 ]]; then
+          # Store duration for tracking
+          actual_cost="duration:$dur_ms"
+        fi
+      fi
+
+      # Tokens remain 0 for Droid (not exposed in exec mode)
+      input_tokens=0
+      output_tokens=0
       ;;
     codex)
       if [[ -n "$CODEX_LAST_MESSAGE_FILE" ]] && [[ -f "$CODEX_LAST_MESSAGE_FILE" ]]; then
@@ -2407,7 +2456,7 @@ run_single_task() {
 
     # Check for empty response
     if [[ -z "$result" ]]; then
-      ((retry_count++))
+      ((retry_count++)) || true
       log_error "Empty response (attempt $retry_count/$MAX_RETRIES)"
       if [[ $retry_count -lt $MAX_RETRIES ]]; then
         log_info "Retrying in ${RETRY_DELAY}s..."
@@ -2423,7 +2472,7 @@ run_single_task() {
     # Check for API errors
     local error_msg
     if ! error_msg=$(check_for_errors "$result"); then
-      ((retry_count++))
+      ((retry_count++)) || true
       log_error "API error: $error_msg (attempt $retry_count/$MAX_RETRIES)"
       if [[ $retry_count -lt $MAX_RETRIES ]]; then
         log_info "Retrying in ${RETRY_DELAY}s..."
@@ -2487,7 +2536,7 @@ run_single_task() {
     # Execute completion criteria if defined in JSON PRD
     if ! execute_completion_criteria "$PRD_FILE" "$current_task" "." "/dev/null"; then
       log_error "Completion criteria failed"
-      ((retry_count++))
+      ((retry_count++)) || true
       if [[ $retry_count -lt $MAX_RETRIES ]]; then
         log_info "Retrying task due to failed completion criteria (attempt $((retry_count + 1))/$MAX_RETRIES)..."
         sleep "$RETRY_DELAY"
@@ -2714,7 +2763,7 @@ Focus only on implementing: $task_name"
     if [[ -n "$result" ]]; then
       local error_msg
       if ! error_msg=$(check_for_errors "$result"); then
-        ((retry++))
+        ((retry++)) || true
         echo "API error: $error_msg (attempt $retry/$MAX_RETRIES)" >> "$log_file"
         sleep "$RETRY_DELAY"
         continue
@@ -2723,7 +2772,7 @@ Focus only on implementing: $task_name"
       break
     fi
     
-    ((retry++))
+    ((retry++)) || true
     echo "Retry $retry/$MAX_RETRIES after empty response" >> "$log_file"
     sleep "$RETRY_DELAY"
   done
@@ -2834,8 +2883,9 @@ run_parallel_tasks() {
   log_info "Base branch: $BASE_BRANCH"
 
   # Store original base branch for final merge (addresses Greptile review)
-  local ORIGINAL_BASE_BRANCH="$BASE_BRANCH"
-  local integration_branches=()  # Track integration branches for cleanup
+  # Using global variables so cleanup() can access them on interrupt
+  ORIGINAL_BASE_BRANCH="$BASE_BRANCH"
+  integration_branches=()  # Reset for this run
 
   # Export variables needed by subshell agents
   export AI_ENGINE MAX_RETRIES RETRY_DELAY PRD_SOURCE PRD_FILE CREATE_PR PR_DRAFT
@@ -2874,7 +2924,7 @@ run_parallel_tasks() {
     local total_group_tasks=${#tasks[@]}
 
     while [[ $batch_start -lt $total_group_tasks ]]; do
-      ((batch_num++))
+      ((batch_num++)) || true
       local batch_end=$((batch_start + MAX_PARALLEL))
       [[ $batch_end -gt $total_group_tasks ]] && batch_end=$total_group_tasks
       local batch_size=$((batch_end - batch_start))
@@ -2897,7 +2947,7 @@ run_parallel_tasks() {
       for ((i = batch_start; i < batch_end; i++)); do
         local task="${tasks[$i]}"
         local agent_num=$((iteration + 1))
-        ((iteration++))
+        ((iteration++)) || true
 
         local status_file=$(mktemp)
         local output_file=$(mktemp)
@@ -2943,17 +2993,17 @@ run_parallel_tasks() {
           case "$status" in
             "setting up")
               all_done=false
-              ((setting_up++))
+              ((setting_up++)) || true
               ;;
             running)
               all_done=false
-              ((running++))
+              ((running++)) || true
               ;;
             done)
-              ((done_count++))
+              ((done_count++)) || true
               ;;
             failed)
-              ((failed_count++))
+              ((failed_count++)) || true
               ;;
             *)
               # Check if process is still running
@@ -3093,7 +3143,7 @@ run_parallel_tasks() {
         local merge_failed=false
         local merged_count=0
         local current_head
-        current_head=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        current_head=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 
         # Temporarily checkout the integration branch to perform merges
         log_trace "Running: git checkout $integration_branch"
@@ -3109,12 +3159,16 @@ run_parallel_tasks() {
               merge_failed=true
               break
             fi
-            ((merged_count++))
+            ((merged_count++)) || true
             log_file_only "DEBUG" "Successfully merged branch $merged_count/${#group_completed_branches[@]}: $branch"
           done
 
           # Return to original HEAD to avoid state confusion
-          git checkout "$current_head" >/dev/null 2>&1 || git checkout "$ORIGINAL_BASE_BRANCH" >/dev/null 2>&1 || true
+          if [[ -n "$current_head" ]]; then
+            git checkout "$current_head" >/dev/null 2>&1 || git checkout "$ORIGINAL_BASE_BRANCH" >/dev/null 2>&1 || true
+          else
+            git checkout "$ORIGINAL_BASE_BRANCH" >/dev/null 2>&1 || true
+          fi
 
           if [[ "$merge_failed" == false ]]; then
             # Update BASE_BRANCH for next group
@@ -3127,17 +3181,17 @@ run_parallel_tasks() {
           else
             # Delete failed integration branch
             git branch -D "$integration_branch" >/dev/null 2>&1 || true
-            log_warn "Integration merge failed; next group will branch from original BASE_BRANCH"
+            log_warn "Integration merge failed; next group will branch from current BASE_BRANCH ($BASE_BRANCH)"
             log_structured "integration_failed" "group" "$group" "reason" "merge_conflict"
           fi
         else
           # Couldn't checkout, clean up the branch
           git branch -D "$integration_branch" >/dev/null 2>&1 || true
-log_warn "Could not checkout integration branch; next group will branch from original BASE_BRANCH"
+log_warn "Could not checkout integration branch; next group will branch from current BASE_BRANCH ($BASE_BRANCH)"
           log_structured "integration_failed" "group" "$group" "reason" "checkout_failed"
         fi
       else
-        log_warn "Could not create integration branch; next group will branch from original BASE_BRANCH"
+        log_warn "Could not create integration branch; next group will branch from current BASE_BRANCH ($BASE_BRANCH)"
         log_structured "integration_failed" "group" "$group" "reason" "checkout_failed"
       fi
     else
@@ -3486,6 +3540,7 @@ main() {
     cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
     codex) engine_display="${BLUE}Codex${RESET}" ;;
     qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
+    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
@@ -3519,7 +3574,7 @@ main() {
 
   # Sequential main loop
   while true; do
-    ((iteration++))
+    ((iteration++)) || true
     local result_code=0
     run_single_task "" "$iteration" || result_code=$?
     

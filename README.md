@@ -2,7 +2,7 @@
 
 > *Like a pretzel's infinite loop, RalfPretzel keeps working until every task is done.*
 
-An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Code, OpenCode, Codex, Cursor, or Qwen) to work through tasks until everything is complete.
+An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Code, OpenCode, Codex, Cursor, Qwen, or Factory Droid) to work through tasks until everything is complete.
 
 **Forked from [michaelshimeles/ralphy](https://github.com/michaelshimeles/ralphy)** - Enhanced with JSON PRD support, comprehensive logging, schemas, and more.
 
@@ -42,7 +42,7 @@ ralfpretzel --json prd.json
 ## Requirements
 
 **Required:**
-- One of: [Claude Code CLI](https://github.com/anthropics/claude-code), [OpenCode CLI](https://opencode.ai/docs/), Codex CLI, [Cursor](https://cursor.com) (with `agent` in PATH), or Qwen-Code
+- One of: [Claude Code CLI](https://github.com/anthropics/claude-code), [OpenCode CLI](https://opencode.ai/docs/), Codex CLI, [Cursor](https://cursor.com) (with `agent` in PATH), Qwen-Code, or [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart)
 - `jq` (for JSON parsing)
 
 **Optional:**
@@ -218,6 +218,7 @@ ralfpretzel --codex      # Codex CLI
 ralfpretzel --opencode   # OpenCode
 ralfpretzel --cursor     # Cursor agent
 ralfpretzel --qwen       # Qwen-Code
+ralfpretzel --droid      # Factory Droid
 ```
 
 | Engine | CLI Command | Permissions Flag | Output |
@@ -227,6 +228,7 @@ ralfpretzel --qwen       # Qwen-Code
 | Codex | `codex` | N/A | Token usage (if provided) |
 | Cursor | `agent` | `--force` | API duration (no token counts) |
 | Qwen-Code | `qwen` | `--approval-mode yolo` | Token usage (if provided) |
+| Factory Droid | `droid` | `--auto medium` | Duration (no token counts) |
 
 ## Configuration
 
