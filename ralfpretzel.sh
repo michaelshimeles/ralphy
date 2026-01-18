@@ -12,7 +12,7 @@ set -euo pipefail
 # CONFIGURATION & DEFAULTS
 # ============================================
 
-VERSION="3.1.0"
+VERSION="0.9.0-beta"
 
 # Runtime options
 SKIP_TESTS=false

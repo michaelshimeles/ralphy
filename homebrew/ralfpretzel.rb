@@ -4,12 +4,16 @@
 # Homebrew formula for RalfPretzel
 # Install: brew install czaku/ralfpretzel/ralfpretzel
 # Or: brew tap czaku/ralfpretzel && brew install ralfpretzel
+#
+# NOTE: v1.0.0 tagged release not yet available
+# For now, install from HEAD: brew install --HEAD czaku/ralfpretzel/ralfpretzel
+# The url/sha256 below will be activated when v1.0.0 is released
 
 class Ralfpretzel < Formula
   desc "Autonomous AI coding loop that orchestrates AI assistants"
   homepage "https://github.com/czaku/ralfpretzel"
   url "https://github.com/czaku/ralfpretzel/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "PLACEHOLDER_SHA256"
+  sha256 "PLACEHOLDER_SHA256"  # Will be updated when v1.0.0 is released
   license "MIT"
   head "https://github.com/czaku/ralfpretzel.git", branch: "main"
 

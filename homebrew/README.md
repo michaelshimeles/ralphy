@@ -2,6 +2,8 @@
 
 This directory contains the Homebrew formula for RalfPretzel.
 
+> **Note:** v1.0.0 has not been released yet. The formula supports HEAD installation from the main branch. Follow the steps below when you're ready to create the v1.0.0 release.
+
 ## Setting Up Your Own Tap
 
 To distribute RalfPretzel via Homebrew, you need to create a separate repository for the tap:
