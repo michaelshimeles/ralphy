@@ -2164,7 +2164,7 @@ run_parallel_tasks() {
           done
 
           # Return to original HEAD to avoid state confusion
-          git checkout "$current_head" >/dev/null 2>&1 || git checkout "$BASE_BRANCH" >/dev/null 2>&1 || true
+          git checkout "$current_head" >/dev/null 2>&1 || git checkout "$ORIGINAL_BASE_BRANCH" >/dev/null 2>&1 || true
 
           if [[ "$merge_failed" == false ]]; then
             # Update BASE_BRANCH for next group
@@ -2250,7 +2250,7 @@ log_warn "Could not checkout integration branch; next group will branch from ori
           # Also cleanup the individual agent branches that were merged into integration
           echo "${DIM}Cleaning up agent branches...${RESET}"
           for branch in "${completed_branches[@]}"; do
-            git branch -d "$branch" >/dev/null 2>&1 && \
+            git branch -D "$branch" >/dev/null 2>&1 && \
               echo "  ${DIM}Deleted ${branch}${RESET}" || true
           done
         else
