@@ -1,0 +1,70 @@
+# Ralphy YAML Tasks Schema
+#
+# YAML format is designed for simple, quick task lists.
+# For complex orchestration with rich metadata, use JSON format instead.
+#
+# Validate with: yq eval-all 'true' tasks.yaml
+
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://github.com/czaku/ralphy/schemas/tasks.schema.yaml"
+title: "Ralphy YAML Tasks Schema"
+description: "Schema for simple YAML task files used by ralphy"
+
+type: object
+required:
+  - tasks
+
+properties:
+  # Optional metadata
+  title:
+    type: string
+    description: "Optional title for the task list"
+
+  description:
+    type: string
+    description: "Optional description of what this task list accomplishes"
+
+  tasks:
+    type: array
+    description: "List of tasks to complete"
+    minItems: 1
+    items:
+      $ref: "#/definitions/task"
+
+definitions:
+  task:
+    type: object
+    required:
+      - title
+    properties:
+      title:
+        type: string
+        description: "Task title/description - this is what the AI agent will implement"
+        minLength: 1
+
+      completed:
+        type: boolean
+        default: false
+        description: "Whether this task has been completed (set automatically by ralphy)"
+
+      parallel_group:
+        type: integer
+        minimum: 0
+        default: 0
+        description: |
+          Execution group for parallel processing.
+          - Tasks with the same parallel_group value can run in parallel
+          - Groups execute in ascending order (0 first, then 1, then 2...)
+          - Default is 0 (all tasks in same group = sequential by default)
+
+# Example valid YAML:
+#
+# tasks:
+#   - title: Add user authentication
+#     parallel_group: 1
+#   - title: Create login form
+#     parallel_group: 1
+#   - title: Integrate auth with dashboard
+#     parallel_group: 2
+#
+# This runs auth and login in parallel (group 1), then integration (group 2)
