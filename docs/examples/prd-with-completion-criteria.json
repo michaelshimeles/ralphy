@@ -1,0 +1,76 @@
+{
+  "title": "User Authentication Feature",
+  "branchName": "feature/auth",
+  "phase": "Phase 1 - Core Authentication",
+  "mandatoryPolicies": [
+    "All code must have tests",
+    "Follow existing code style",
+    "Security best practices must be followed"
+  ],
+  "referenceDocuments": {
+    "API Spec": "./docs/api-spec.md",
+    "Security Guidelines": "./docs/security.md"
+  },
+  "rules": {
+    "Code Style": "./docs/style-guide.md",
+    "Testing Standards": "./docs/testing-standards.md"
+  },
+  "userStories": [
+    {
+      "id": "AUTH-1",
+      "title": "Implement JWT authentication",
+      "description": "Create JWT token generation and validation logic",
+      "platforms": ["api"],
+      "files": ["src/auth/jwt.ts", "tests/auth/jwt.test.ts"],
+      "acceptanceCriteria": [
+        "JWT tokens are generated with proper claims",
+        "Tokens are validated correctly",
+        "Expired tokens are rejected",
+        "Invalid signatures are rejected"
+      ],
+      "completionCriteria": [
+        "npm test -- auth/jwt.test.ts",
+        "npm run lint -- src/auth/jwt.ts",
+        "npm run type-check"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "id": "AUTH-2",
+      "title": "Add login endpoint",
+      "description": "Create POST /api/auth/login endpoint",
+      "platforms": ["api"],
+      "files": ["src/api/auth.ts", "tests/api/auth.test.ts"],
+      "acceptanceCriteria": [
+        "Returns 200 with JWT token on valid credentials",
+        "Returns 401 on invalid credentials",
+        "Returns 429 on rate limit exceeded",
+        "Logs failed login attempts"
+      ],
+      "completionCriteria": [
+        "npm test -- api/auth.test.ts",
+        "npm run lint",
+        "curl -X POST http://localhost:3000/api/auth/login -d '{\"email\":\"test@example.com\"}' | jq -e '.token'"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "id": "AUTH-3",
+      "title": "Add logout endpoint",
+      "description": "Create POST /api/auth/logout endpoint with token invalidation",
+      "platforms": ["api"],
+      "files": ["src/api/auth.ts", "tests/api/auth.test.ts"],
+      "acceptanceCriteria": [
+        "Invalidates JWT token",
+        "Returns 204 on success",
+        "Requires valid token"
+      ],
+      "completionCriteria": [
+        "npm test",
+        "npm run build",
+        "npm run lint"
+      ],
+      "parallel_group": 2
+    }
+  ]
+}

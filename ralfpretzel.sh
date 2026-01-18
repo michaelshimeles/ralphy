@@ -12,7 +12,7 @@ set -euo pipefail
 # CONFIGURATION & DEFAULTS
 # ============================================
 
-VERSION="0.9.0-beta"
+VERSION="0.9.1"
 
 # Runtime options
 SKIP_TESTS=false
@@ -282,6 +282,64 @@ load_config() {
   fi
 }
 
+# Validate config and provide helpful error messages
+validate_config() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    return 0  # No config is fine
+  fi
+
+  # Check if AI engine is installed
+  if [[ -n "${AI_ENGINE:-}" ]]; then
+    local engine_cmd=""
+    local install_url=""
+    
+    case "$AI_ENGINE" in
+      claude)
+        engine_cmd="claude"
+        install_url="https://github.com/anthropics/claude-code"
+        ;;
+      opencode)
+        engine_cmd="opencode"
+        install_url="https://opencode.ai/docs/"
+        ;;
+      codex)
+        engine_cmd="codex"
+        install_url="https://github.com/codex-cli/codex"
+        ;;
+      cursor)
+        engine_cmd="agent"
+        install_url="https://cursor.com"
+        ;;
+      qwen)
+        engine_cmd="qwen"
+        install_url="https://github.com/qwen-code/qwen-cli"
+        ;;
+      *)
+        log_warn "Unknown AI engine in config: $AI_ENGINE"
+        return 0
+        ;;
+    esac
+    
+    if ! command -v "$engine_cmd" &>/dev/null; then
+      echo ""
+      log_error "❌ ${AI_ENGINE} CLI not found!"
+      echo ""
+      echo "  Install: $install_url"
+      echo ""
+      echo "  Or reconfigure:"
+      echo "    ralfpretzel -i               # Run setup wizard"
+      echo "    ralfpretzel config reset     # Reset config"
+      echo ""
+      echo "  Or use different engine:"
+      echo "    ralfpretzel --opencode --json prd.json"
+      echo ""
+      return 1
+    fi
+  fi
+  
+  return 0
+}
+
 save_config() {
   mkdir -p "$CONFIG_DIR"
   cat > "$CONFIG_FILE" <<EOF
@@ -305,7 +363,61 @@ EOF
 # INTERACTIVE WIZARD
 # ============================================
 
+# Detect custom OpenCode models from user config
+detect_opencode_custom_models() {
+  local opencode_config="${HOME}/.config/opencode/opencode.json"
+  if [[ -f "$opencode_config" ]] && command -v jq &>/dev/null; then
+    # Parse provider.models to get custom model IDs
+    local custom_models
+    custom_models=$(jq -r '
+      .provider // {} | 
+      to_entries[] | 
+      .value.models // {} | 
+      keys[] // empty
+    ' "$opencode_config" 2>/dev/null | sort -u)
+    
+    if [[ -n "$custom_models" ]]; then
+      echo "$custom_models"
+    fi
+  fi
+}
+
+# Detect custom Codex models from user config
+detect_codex_custom_models() {
+  # Codex CLI may store custom models in ~/.config/codex/config.json or similar
+  local codex_config="${HOME}/.config/codex/config.json"
+  if [[ -f "$codex_config" ]] && command -v jq &>/dev/null; then
+    # Try to parse custom models from config
+    local custom_models
+    custom_models=$(jq -r '.models[]? // empty' "$codex_config" 2>/dev/null | sort -u)
+    
+    if [[ -n "$custom_models" ]]; then
+      echo "$custom_models"
+    fi
+  fi
+}
+
+# Detect custom Qwen models from user config
+detect_qwen_custom_models() {
+  # Qwen may store custom models in ~/.qwen/config.json or similar
+  local qwen_config="${HOME}/.qwen/config.json"
+  if [[ -f "$qwen_config" ]] && command -v jq &>/dev/null; then
+    # Try to parse custom models from config
+    local custom_models
+    custom_models=$(jq -r '.models[]? // empty' "$qwen_config" 2>/dev/null | sort -u)
+    
+    if [[ -n "$custom_models" ]]; then
+      echo "$custom_models"
+    fi
+  fi
+}
+
 interactive_wizard() {
+  # Show banner on first launch
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    show_banner
+  fi
+  
   log_info "🧙 Welcome to RalfPretzel Interactive Setup"
   echo ""
   
@@ -364,11 +476,32 @@ interactive_wizard() {
         ;;
         
       opencode)
+        # Detect custom models from OpenCode config
+        local custom_models
+        custom_models=$(detect_opencode_custom_models)
+        
         echo "  1) gpt-4o (recommended)"
         echo "  2) gpt-4-turbo"
         echo "  3) gpt-3.5-turbo (fastest, cheapest)"
         echo "  4) o1-preview (advanced reasoning)"
-        echo "  5) Custom model ID"
+        echo "  5) o1 (production reasoning)"
+        echo "  6) deepseek-chat (DeepSeek V3)"
+        echo "  7) minimax-m2.1 (MiniMax M2.1)"
+        
+        local option_num=8
+        local -a custom_model_array
+        if [[ -n "$custom_models" ]]; then
+          echo ""
+          log_info "Custom models detected:"
+          while IFS= read -r custom_model; do
+            echo "  $option_num) $custom_model (custom)"
+            custom_model_array+=("$custom_model")
+            ((option_num++))
+          done <<< "$custom_models"
+        fi
+        
+        echo ""
+        echo "  99) Enter custom model ID"
         echo ""
         read -rp "Choice [1]: " model_choice
         model_choice=${model_choice:-1}
@@ -378,17 +511,47 @@ interactive_wizard() {
           2) MODEL_ID="gpt-4-turbo" ;;
           3) MODEL_ID="gpt-3.5-turbo" ;;
           4) MODEL_ID="o1-preview" ;;
-          5) 
+          5) MODEL_ID="o1" ;;
+          6) MODEL_ID="deepseek-chat" ;;
+          7) MODEL_ID="minimax-m2.1" ;;
+          99) 
             read -rp "Enter custom model ID: " MODEL_ID
             ;;
-          *) MODEL_ID="gpt-4o" ;;
+          *)
+            # Check if choice matches a custom model
+            local custom_idx=$((model_choice - 8))
+            if [[ $custom_idx -ge 0 ]] && [[ $custom_idx -lt ${#custom_model_array[@]} ]]; then
+              MODEL_ID="${custom_model_array[$custom_idx]}"
+            else
+              log_warn "Invalid choice, using default"
+              MODEL_ID="gpt-4o"
+            fi
+            ;;
         esac
         ;;
         
       codex)
+        # Detect custom models from Codex config
+        local custom_models
+        custom_models=$(detect_codex_custom_models)
+        
         echo "  1) deepseek-v3 (recommended)"
         echo "  2) claude-sonnet-4"
-        echo "  3) Custom model ID"
+        
+        local option_num=3
+        local -a custom_model_array
+        if [[ -n "$custom_models" ]]; then
+          echo ""
+          log_info "Custom models detected:"
+          while IFS= read -r custom_model; do
+            echo "  $option_num) $custom_model (custom)"
+            custom_model_array+=("$custom_model")
+            ((option_num++))
+          done <<< "$custom_models"
+        fi
+        
+        echo ""
+        echo "  99) Enter custom model ID"
         echo ""
         read -rp "Choice [1]: " model_choice
         model_choice=${model_choice:-1}
@@ -396,10 +559,19 @@ interactive_wizard() {
         case $model_choice in
           1) MODEL_ID="deepseek-v3" ;;
           2) MODEL_ID="claude-sonnet-4" ;;
-          3) 
+          99) 
             read -rp "Enter custom model ID: " MODEL_ID
             ;;
-          *) MODEL_ID="deepseek-v3" ;;
+          *)
+            # Check if choice matches a custom model
+            local custom_idx=$((model_choice - 3))
+            if [[ $custom_idx -ge 0 ]] && [[ $custom_idx -lt ${#custom_model_array[@]} ]]; then
+              MODEL_ID="${custom_model_array[$custom_idx]}"
+            else
+              log_warn "Invalid choice, using default"
+              MODEL_ID="deepseek-v3"
+            fi
+            ;;
         esac
         ;;
         
@@ -409,9 +581,27 @@ interactive_wizard() {
         ;;
         
       qwen)
+        # Detect custom models from Qwen config
+        local custom_models
+        custom_models=$(detect_qwen_custom_models)
+        
         echo "  1) qwen-2.5-coder-32b (recommended)"
         echo "  2) qwen-2.5-coder-72b (most capable)"
-        echo "  3) Custom model ID"
+        
+        local option_num=3
+        local -a custom_model_array
+        if [[ -n "$custom_models" ]]; then
+          echo ""
+          log_info "Custom models detected:"
+          while IFS= read -r custom_model; do
+            echo "  $option_num) $custom_model (custom)"
+            custom_model_array+=("$custom_model")
+            ((option_num++))
+          done <<< "$custom_models"
+        fi
+        
+        echo ""
+        echo "  99) Enter custom model ID"
         echo ""
         read -rp "Choice [1]: " model_choice
         model_choice=${model_choice:-1}
@@ -419,10 +609,19 @@ interactive_wizard() {
         case $model_choice in
           1) MODEL_ID="qwen-2.5-coder-32b" ;;
           2) MODEL_ID="qwen-2.5-coder-72b" ;;
-          3) 
+          99) 
             read -rp "Enter custom model ID: " MODEL_ID
             ;;
-          *) MODEL_ID="qwen-2.5-coder-32b" ;;
+          *)
+            # Check if choice matches a custom model
+            local custom_idx=$((model_choice - 3))
+            if [[ $custom_idx -ge 0 ]] && [[ $custom_idx -lt ${#custom_model_array[@]} ]]; then
+              MODEL_ID="${custom_model_array[$custom_idx]}"
+            else
+              log_warn "Invalid choice, using default"
+              MODEL_ID="qwen-2.5-coder-32b"
+            fi
+            ;;
         esac
         ;;
     esac
@@ -471,9 +670,33 @@ interactive_wizard() {
   fi
   
   # Step 4: Save preferences
+  local is_first_launch=false
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    is_first_launch=true
+  fi
+  
   read -rp "Save these settings as default? [Y/n]: " save_choice
   save_choice=${save_choice:-Y}
   if [[ "${save_choice}" =~ ^[Yy] ]]; then
+    # Ask about interactive mode preference on first launch
+    if [[ "$is_first_launch" == true ]]; then
+      echo ""
+      log_info "Would you like to run this setup wizard on every launch?"
+      echo "  1) No - use saved defaults (recommended)"
+      echo "  2) Yes - always ask me these questions"
+      echo ""
+      read -rp "Choice [1]: " wizard_choice
+      wizard_choice=${wizard_choice:-1}
+      
+      if [[ "$wizard_choice" == "2" ]]; then
+        INTERACTIVE_MODE=true
+        log_success "Interactive mode enabled. Run 'ralfpretzel -n' to skip wizard."
+      else
+        INTERACTIVE_MODE=false
+        log_success "Interactive mode disabled. Run 'ralfpretzel -i' to run wizard again."
+      fi
+    fi
+    
     save_config
     log_success "Preferences saved to ${CONFIG_FILE}"
   else
@@ -577,8 +800,11 @@ ${BOLD}USAGE:${RESET}
   ralfpretzel --no-interactive   # Skip wizard, use defaults/config
 
 ${BOLD}INTERACTIVE MODE:${RESET}
-  -i, --interactive      Launch interactive setup wizard (default)
+  -i, --interactive      Launch interactive setup wizard
   -n, --no-interactive   Skip wizard, use command-line flags or saved config
+  
+  NOTE: Wizard runs automatically on first launch, then uses saved defaults.
+        Use -i to re-run wizard anytime to change settings.
 
 ${BOLD}AI ENGINE & MODEL:${RESET}
   --claude            Use Claude Code (default)
@@ -600,6 +826,10 @@ ${BOLD}COMMON MODELS BY ENGINE:${RESET}
     gpt-4-turbo                 Fast GPT-4
     gpt-3.5-turbo               Fastest, cheapest
     o1-preview                  Advanced reasoning
+    o1                          Production reasoning
+    deepseek-chat               DeepSeek V3
+    minimax-m2.1                MiniMax M2.1
+    (custom models)             From ~/.config/opencode/opencode.json
 
   Codex:
     deepseek-v3                 Recommended
@@ -709,9 +939,17 @@ ${BOLD}PRD FORMATS:${RESET}
 ${BOLD}CONFIGURATION:${RESET}
   Config file: ~/.ralfpretzel/config
   
-  The interactive wizard can save your preferences. To disable the wizard
-  by default, add this to your config:
-    INTERACTIVE_MODE=false
+  First launch: Interactive wizard walks you through setup and asks if you
+  want it to run every time (default: no, use saved defaults).
+  
+  To change saved preferences later:
+    - Run: ralfpretzel -i
+    - Or edit: ~/.ralfpretzel/config manually
+  
+  Custom models: Automatically detected from:
+    - OpenCode: ~/.config/opencode/opencode.json
+    - Codex:    ~/.config/codex/config.json
+    - Qwen:     ~/.qwen/config.json
 
   Progress tracking: .ralfpretzel/progress/
     - Per-group progress files during execution
@@ -720,13 +958,138 @@ ${BOLD}CONFIGURATION:${RESET}
 EOF
 }
 
+# Show pretzel banner
+show_banner() {
+  if [[ "${SHOW_BANNER:-true}" == "false" ]]; then
+    return
+  fi
+
+  cat << 'EOF'
+  ____       _  __   ____            _          _ 
+ |  _ \ __ _| |/ _| |  _ \ _ __ ___| |_ _______| |
+ | |_) / _` | | |_  | |_) | '__/ _ \ __|_  / _ \ |
+ |  _ < (_| | |  _| |  __/| | |  __/ |_ / /  __/ |
+ |_| \_\__,_|_|_|   |_|   |_|  \___|\__/___\___|_|
+
+ 🥨 Loops until done
+EOF
+  echo ""
+}
+
 show_version() {
-  echo "Ralphy v${VERSION}"
+  show_banner
+  echo "RalfPretzel v${VERSION}"
+  echo "Autonomous AI Coding Loop"
+  echo ""
+  echo "Homepage: https://github.com/czaku/ralfpretzel"
+  echo "Original: https://github.com/michaelshimeles/ralphy"
 }
 
 # ============================================
 # ARGUMENT PARSING
 # ============================================
+
+# Handle config subcommand
+handle_config_command() {
+  local subcmd="${1:-list}"
+  
+  case "$subcmd" in
+    list)
+      if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_info "No config file found at: $CONFIG_FILE"
+        log_info "Run 'ralfpretzel' to create config via interactive setup"
+        return 0
+      fi
+      
+      log_info "Current configuration ($CONFIG_FILE):"
+      echo ""
+      cat "$CONFIG_FILE"
+      ;;
+      
+    get)
+      local key="$2"
+      if [[ -z "$key" ]]; then
+        log_error "Usage: ralfpretzel config get <key>"
+        return 1
+      fi
+      
+      if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "No config file found"
+        return 1
+      fi
+      
+      local value
+      value=$(grep "^${key}=" "$CONFIG_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"')
+      
+      if [[ -n "$value" ]]; then
+        echo "$value"
+      else
+        log_error "Key '$key' not found in config"
+        return 1
+      fi
+      ;;
+      
+    set)
+      local key="$2"
+      local value="$3"
+      
+      if [[ -z "$key" ]] || [[ -z "$value" ]]; then
+        log_error "Usage: ralfpretzel config set <key> <value>"
+        return 1
+      fi
+      
+      # Create config dir if needed
+      mkdir -p "$CONFIG_DIR"
+      
+      # If config exists, update or append
+      if [[ -f "$CONFIG_FILE" ]]; then
+        if grep -q "^${key}=" "$CONFIG_FILE"; then
+          # Update existing key
+          sed -i.bak "s|^${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE"
+          rm -f "${CONFIG_FILE}.bak"
+        else
+          # Append new key
+          echo "${key}=\"${value}\"" >> "$CONFIG_FILE"
+        fi
+      else
+        # Create new config
+        echo "${key}=\"${value}\"" > "$CONFIG_FILE"
+      fi
+      
+      log_success "Set ${key}=\"${value}\""
+      ;;
+      
+    reset)
+      if [[ -f "$CONFIG_FILE" ]]; then
+        rm -f "$CONFIG_FILE"
+        log_success "Config reset. Run 'ralfpretzel' to set up again."
+      else
+        log_info "No config file to reset"
+      fi
+      ;;
+      
+    path)
+      echo "$CONFIG_FILE"
+      if [[ -f "$CONFIG_FILE" ]]; then
+        log_success "Config file exists"
+      else
+        log_info "Config file does not exist yet"
+      fi
+      ;;
+      
+    *)
+      log_error "Unknown config command: $subcmd"
+      echo ""
+      echo "Available commands:"
+      echo "  list              Show current configuration"
+      echo "  get <key>         Get specific config value"
+      echo "  set <key> <val>   Set config value"
+      echo "  reset             Delete config file"
+      echo "  path              Show config file location"
+      return 1
+      ;;
+  esac
+}
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -1526,6 +1889,150 @@ notify_error() {
 # PROMPT BUILDER
 # ============================================
 
+# Load reference documents from JSON PRD
+load_reference_documents() {
+  local prd_file="$1"
+  local references=""
+  
+  if [[ ! -f "$prd_file" ]]; then
+    return
+  fi
+  
+  # Extract referenceDocuments from JSON
+  local ref_docs
+  ref_docs=$(jq -r '.referenceDocuments // empty | to_entries[] | "\(.key)|\(.value)"' "$prd_file" 2>/dev/null)
+  
+  if [[ -n "$ref_docs" ]]; then
+    references="${references}Reference Documents:\n\n"
+    
+    while IFS='|' read -r title path; do
+      if [[ -f "$path" ]]; then
+        references="${references}--- ${title} (${path}) ---\n"
+        references="${references}$(cat "$path")\n\n"
+      else
+        log_warn "Reference document not found: $path"
+      fi
+    done <<< "$ref_docs"
+  fi
+  
+  echo -e "$references"
+}
+
+# Load rules from JSON PRD
+load_rules() {
+  local prd_file="$1"
+  local rules=""
+  
+  if [[ ! -f "$prd_file" ]]; then
+    return
+  fi
+  
+  # Extract rules from JSON
+  local rule_files
+  rule_files=$(jq -r '.rules // empty | to_entries[] | "\(.key)|\(.value)"' "$prd_file" 2>/dev/null)
+  
+  if [[ -n "$rule_files" ]]; then
+    rules="${rules}MANDATORY RULES (must follow):\n\n"
+    
+    while IFS='|' read -r title path; do
+      if [[ -f "$path" ]]; then
+        rules="${rules}--- ${title} (${path}) ---\n"
+        rules="${rules}$(cat "$path")\n\n"
+      else
+        log_warn "Rule file not found: $path"
+      fi
+    done <<< "$rule_files"
+  fi
+  
+  echo -e "$rules"
+}
+
+# Execute completion criteria for a task
+# Execute completion criteria for a task
+execute_completion_criteria() {
+  local prd_file="$1"
+  local task_title="$2"
+  local worktree_dir="$3"
+  local log_file="$4"
+  
+  # Only works with JSON PRD
+  if [[ "$PRD_SOURCE" != "json" ]] || [[ ! -f "$prd_file" ]]; then
+    return 0  # No criteria to check
+  fi
+  
+  # Extract completion criteria for this specific task (by title)
+  local criteria
+  criteria=$(jq -r --arg title "$task_title" '
+    .userStories[]? | 
+    select(.title == $title) | 
+    .completionCriteria[]? // empty
+  ' "$prd_file" 2>/dev/null)
+  
+  if [[ -z "$criteria" ]]; then
+    # No completion criteria defined for this task
+    return 0
+  fi
+  
+  # Get task ID for logging
+  local task_id
+  task_id=$(jq -r --arg title "$task_title" '
+    .userStories[]? | 
+    select(.title == $title) | 
+    .id // "unknown"
+  ' "$prd_file" 2>/dev/null)
+  
+  log_debug "Checking completion criteria for task ${task_id} (${task_title})..."
+  echo "=== Completion Criteria Check ===" >> "$log_file"
+  echo "Task: ${task_id} - ${task_title}" >> "$log_file"
+  
+  local all_passed=true
+  local failed_commands=()
+  
+  while IFS= read -r command; do
+    [[ -z "$command" ]] && continue
+    
+    log_debug "  Running: $command"
+    echo "Running: $command" >> "$log_file"
+    
+    local cmd_output
+    local cmd_exit_code
+    
+    # Execute command in worktree directory
+    if cmd_output=$(cd "$worktree_dir" && eval "$command" 2>&1); then
+      cmd_exit_code=$?
+    else
+      cmd_exit_code=$?
+    fi
+    
+    if [[ $cmd_exit_code -eq 0 ]]; then
+      log_debug "  ✓ Passed: $command"
+      echo "✓ PASSED" >> "$log_file"
+      [[ -n "$cmd_output" ]] && echo "$cmd_output" >> "$log_file"
+    else
+      log_warn "  ✗ Failed: $command (exit code: $cmd_exit_code)"
+      echo "✗ FAILED (exit code: $cmd_exit_code)" >> "$log_file"
+      echo "$cmd_output" >> "$log_file"
+      all_passed=false
+      failed_commands+=("$command")
+    fi
+    
+    echo "" >> "$log_file"
+  done <<< "$criteria"
+  
+  if [[ "$all_passed" == true ]]; then
+    log_success "All completion criteria passed"
+    echo "=== All Completion Criteria Passed ===" >> "$log_file"
+    return 0
+  else
+    log_error "Completion criteria failed. Failed commands:"
+    for cmd in "${failed_commands[@]}"; do
+      log_error "  - $cmd"
+    done
+    echo "=== Completion Criteria Failed ===" >> "$log_file"
+    return 1
+  fi
+}
+
 build_prompt() {
   local task_override="${1:-}"
   local prompt=""
@@ -1537,6 +2044,17 @@ build_prompt() {
       ;;
     yaml)
       prompt="@${PRD_FILE} @progress.txt"
+      ;;
+    json)
+      # Load reference documents and rules from JSON PRD
+      local ref_docs rules_content
+      ref_docs=$(load_reference_documents "$PRD_FILE")
+      rules_content=$(load_rules "$PRD_FILE")
+      
+      prompt="@${PRD_FILE} @progress.txt
+
+$ref_docs
+$rules_content"
       ;;
     github)
       # For GitHub issues, we include the issue body
@@ -1966,6 +2484,19 @@ run_single_task() {
       CODEX_LAST_MESSAGE_FILE=""
     fi
 
+    # Execute completion criteria if defined in JSON PRD
+    if ! execute_completion_criteria "$PRD_FILE" "$current_task" "." "/dev/null"; then
+      log_error "Completion criteria failed"
+      ((retry_count++))
+      if [[ $retry_count -lt $MAX_RETRIES ]]; then
+        log_info "Retrying task due to failed completion criteria (attempt $((retry_count + 1))/$MAX_RETRIES)..."
+        sleep "$RETRY_DELAY"
+        continue
+      fi
+      return_to_base_branch
+      return 1
+    fi
+
     # Mark task complete for GitHub issues (since AI can't do it)
     if [[ "$PRD_SOURCE" == "github" ]]; then
       mark_task_complete "$current_task"
@@ -2220,6 +2751,15 @@ Focus only on implementing: $task_name"
       echo "ERROR: No new commits created; treating task as failed." >> "$log_file"
       echo "failed" > "$status_file"
       echo "0 0" > "$output_file"
+      cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
+      return 1
+    fi
+    
+    # Execute completion criteria if defined in JSON PRD
+    if ! execute_completion_criteria "$ORIGINAL_DIR/$PRD_FILE" "$task_name" "$worktree_dir" "$log_file"; then
+      echo "ERROR: Completion criteria failed; treating task as failed." >> "$log_file"
+      echo "failed" > "$status_file"
+      echo "0 0 criteria_failed" > "$output_file"
       cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
       return 1
     fi
@@ -2885,8 +3425,20 @@ show_summary() {
 # ============================================
 
 main() {
+  # Handle config subcommand early
+  if [[ "${1:-}" == "config" ]]; then
+    shift
+    handle_config_command "$@"
+    exit $?
+  fi
+  
   # Load config file first (if exists)
   load_config
+  
+  # Validate config (check if tools are installed)
+  if ! validate_config; then
+    exit 1
+  fi
   
   # Parse command-line arguments (override config)
   parse_args "$@"
