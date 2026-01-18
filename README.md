@@ -1,44 +1,48 @@
-# Ralphy
+# RalfPretzel
 
-![Ralphy](assets/ralphy.jpeg)
+> *Like a pretzel's infinite loop, RalfPretzel keeps working until every task is done.*
 
-An autonomous AI coding loop that runs AI assistants (Claude Code, OpenCode, Codex, or Cursor) to work through tasks until everything is complete.
+An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Code, OpenCode, Codex, Cursor, or Qwen) to work through tasks until everything is complete.
+
+**Forked from [michaelshimeles/ralphy](https://github.com/michaelshimeles/ralphy)** - Enhanced with JSON PRD support, comprehensive logging, schemas, and more.
+
+## What's New in RalfPretzel
+
+| Feature | Original Ralphy | RalfPretzel |
+|---------|----------------|-------------|
+| **JSON PRD Support** | - | Full JSON schema with acceptance criteria, platforms, dependencies |
+| **Logging System** | Basic output | 5-level logging with file output and timestamps |
+| **Task Schemas** | None | JSON Schema + YAML Schema for validation |
+| **Documentation** | README only | Format guides, PRD docs, YAML docs, comparison guides |
+| **Test Suite** | None | 24+ automated tests |
+| **Bug Fixes** | - | parallel_group fixes, BASE_BRANCH handling, edge cases |
 
 ## What It Does
 
-1. Reads tasks from a PRD file, YAML file, or GitHub Issues
-2. Sends each task to an AI assistant
+1. Reads tasks from a **JSON PRD**, YAML file, Markdown PRD, or GitHub Issues
+2. Sends each task to an AI assistant with rich context (acceptance criteria, platforms, policies)
 3. The AI implements the feature, writes tests, and commits changes
-4. Repeats until all tasks are done
+4. Validates completion and repeats until all tasks are done
 
 ## Quick Start
 
 ```bash
-# Clone the repo
-git clone https://github.com/michaelshimeles/ralphy.git
-cd ralphy
+# Clone RalfPretzel
+git clone https://github.com/czaku/ralfpretzel.git
+cd ralfpretzel
 chmod +x ralphy.sh
 
-# Create a PRD file with tasks
-cat > PRD.md << 'EOF'
-# My Project
+# Simple: Markdown PRD
+./ralphy.sh --prd PRD.md
 
-## Tasks
-- [ ] Create user authentication
-- [ ] Add dashboard page
-- [ ] Build API endpoints
-EOF
-
-# Run Ralphy
-./ralphy.sh
+# Better: JSON PRD with rich context
+./ralphy.sh --json prd.json
 ```
-
-That's it. Ralphy will work through each task autonomously.
 
 ## Requirements
 
 **Required:**
-- One of: [Claude Code CLI](https://github.com/anthropics/claude-code), [OpenCode CLI](https://opencode.ai/docs/), Codex CLI, or [Cursor](https://cursor.com) (with `agent` in PATH)
+- One of: [Claude Code CLI](https://github.com/anthropics/claude-code), [OpenCode CLI](https://opencode.ai/docs/), Codex CLI, [Cursor](https://cursor.com) (with `agent` in PATH), or Qwen-Code
 - `jq` (for JSON parsing)
 
 **Optional:**
@@ -46,35 +50,82 @@ That's it. Ralphy will work through each task autonomously.
 - `gh` - only if using GitHub Issues or `--create-pr`
 - `bc` - for cost calculation
 
-## Task Sources
+## Task Formats
 
-### Markdown (default)
+RalfPretzel supports multiple task formats. Choose based on your needs:
+
+| Format | Best For | Features |
+|--------|----------|----------|
+| **JSON PRD** | Complex projects | Acceptance criteria, platforms, dependencies, parallel groups, policies |
+| **YAML** | Simple task lists | Parallel groups, completion tracking |
+| **Markdown** | Quick prototypes | Checkbox-based task tracking |
+| **GitHub Issues** | Issue-driven development | Labels, auto-close on completion |
+
+See [docs/formats.md](docs/formats.md) for a detailed comparison.
+
+### JSON PRD (Recommended for Complex Projects)
 
 ```bash
-./ralphy.sh --prd PRD.md
+./ralphy.sh --json prd.json
 ```
 
-Format your PRD like this:
-```markdown
-## Tasks
-- [ ] First task
-- [ ] Second task
-- [x] Completed task (will be skipped)
+```json
+{
+  "title": "Authentication System",
+  "branchName": "feature/auth",
+  "phase": "Phase 1 - Core Auth",
+  "mandatoryPolicies": [
+    "All code must have tests",
+    "Follow existing patterns"
+  ],
+  "userStories": [
+    {
+      "id": "AUTH-1",
+      "title": "Implement login endpoint",
+      "description": "Create POST /api/auth/login",
+      "platforms": ["api"],
+      "files": ["src/api/auth.ts"],
+      "acceptanceCriteria": [
+        "Returns JWT on success",
+        "Returns 401 on invalid credentials"
+      ],
+      "parallel_group": 1
+    }
+  ]
+}
 ```
 
-### YAML
+See [docs/prd-format.md](docs/prd-format.md) for full schema documentation.
+
+### YAML (Simple Task Lists)
 
 ```bash
 ./ralphy.sh --yaml tasks.yaml
 ```
 
-Format:
 ```yaml
 tasks:
-  - title: First task
-    completed: false
-  - title: Second task
-    completed: false
+  - title: Create User model
+    parallel_group: 1
+  - title: Create Post model
+    parallel_group: 1
+  - title: Add relationships
+    parallel_group: 2
+```
+
+See [docs/yaml-format.md](docs/yaml-format.md) for YAML documentation.
+
+### Markdown
+
+```bash
+./ralphy.sh --prd PRD.md
+```
+
+```markdown
+## Tasks
+- [ ] First task
+- [ ] Second task
+- [x] Completed task (skipped)
 ```
 
 ### GitHub Issues
@@ -84,9 +135,7 @@ tasks:
 ./ralphy.sh --github owner/repo --github-label "ready"
 ```
 
-Uses open issues from the repo. Issues are closed automatically when done.
-
-## Parallel Mode
+## Parallel Execution
 
 Run multiple AI agents simultaneously, each in its own isolated git worktree:
 
@@ -99,7 +148,7 @@ Run multiple AI agents simultaneously, each in its own isolated git worktree:
 
 Each agent gets:
 - Its own git worktree (separate directory)
-- Its own branch (`ralphy/agent-1-task-name`, `ralphy/agent-2-task-name`, etc.)
+- Its own branch (`ralphy/agent-1-task-name`, etc.)
 - Complete isolation from other agents
 
 ```
@@ -108,20 +157,9 @@ Agent 2 ─► worktree: /tmp/xxx/agent-2 ─► branch: ralphy/agent-2-add-api-
 Agent 3 ─► worktree: /tmp/xxx/agent-3 ─► branch: ralphy/agent-3-setup-database
 ```
 
-### After Completion
+### Parallel Groups (YAML/JSON)
 
-**Without `--create-pr`:** Branches are automatically merged back to your base branch. If there are merge conflicts, AI will attempt to resolve them.
-
-**With `--create-pr`:** Each completed task gets its own pull request. Branches are kept for review.
-
-```bash
-./ralphy.sh --parallel --create-pr          # Create PRs for each task
-./ralphy.sh --parallel --create-pr --draft-pr  # Create draft PRs
-```
-
-### YAML Parallel Groups
-
-Control which tasks can run together:
+Control task execution order:
 
 ```yaml
 tasks:
@@ -133,24 +171,24 @@ tasks:
     parallel_group: 2  # Runs after group 1 completes
 ```
 
-Tasks without `parallel_group` default to group `0` and run before higher-numbered groups.
+## Logging
 
-## Branch Workflow
-
-Create a separate branch for each task:
+RalfPretzel includes comprehensive logging:
 
 ```bash
-./ralphy.sh --branch-per-task                        # Create feature branches
-./ralphy.sh --branch-per-task --base-branch main     # Branch from main
-./ralphy.sh --branch-per-task --create-pr            # Create PRs automatically
-./ralphy.sh --branch-per-task --create-pr --draft-pr # Create draft PRs
+# Set log level
+./ralphy.sh --log-level debug
+
+# Write to file
+./ralphy.sh --log-file ralphy.log
+
+# Combined
+./ralphy.sh --log-level trace --log-file debug.log
 ```
 
-Branch naming: `ralphy/<task-name-slug>`
+Log levels: `trace`, `debug`, `info` (default), `warn`, `error`
 
-Example: "Add user authentication" becomes `ralphy/add-user-authentication`
-
-## AI Engine
+## AI Engines
 
 ```bash
 ./ralphy.sh              # Claude Code (default)
@@ -160,8 +198,6 @@ Example: "Add user authentication" becomes `ralphy/add-user-authentication`
 ./ralphy.sh --qwen       # Qwen-Code
 ```
 
-### Engine Details
-
 | Engine | CLI Command | Permissions Flag | Output |
 |--------|-------------|------------------|--------|
 | Claude Code | `claude` | `--dangerously-skip-permissions` | Token usage + cost estimate |
@@ -170,9 +206,16 @@ Example: "Add user authentication" becomes `ralphy/add-user-authentication`
 | Cursor | `agent` | `--force` | API duration (no token counts) |
 | Qwen-Code | `qwen` | `--approval-mode yolo` | Token usage (if provided) |
 
-**Note:** Cursor's CLI doesn't expose token usage, so Ralphy tracks total API duration instead.
-
 ## All Options
+
+### Task Source
+| Flag | Description |
+|------|-------------|
+| `--prd FILE` | Markdown PRD file (default: PRD.md) |
+| `--yaml FILE` | YAML task file |
+| `--json FILE` | JSON PRD file with rich schema |
+| `--github REPO` | Fetch from GitHub issues (owner/repo) |
+| `--github-label TAG` | Filter GitHub issues by label |
 
 ### AI Engine
 | Flag | Description |
@@ -182,14 +225,6 @@ Example: "Add user authentication" becomes `ralphy/add-user-authentication`
 | `--opencode` | Use OpenCode |
 | `--cursor`, `--agent` | Use Cursor agent |
 | `--qwen` | Use Qwen-Code |
-
-### Task Source
-| Flag | Description |
-|------|-------------|
-| `--prd FILE` | PRD file path (default: PRD.md) |
-| `--yaml FILE` | Use YAML task file |
-| `--github REPO` | Fetch from GitHub issues (owner/repo) |
-| `--github-label TAG` | Filter GitHub issues by label |
 
 ### Parallel Execution
 | Flag | Description |
@@ -204,6 +239,12 @@ Example: "Add user authentication" becomes `ralphy/add-user-authentication`
 | `--base-branch NAME` | Base branch (default: current branch) |
 | `--create-pr` | Create pull requests |
 | `--draft-pr` | Create PRs as drafts |
+
+### Logging
+| Flag | Description |
+|------|-------------|
+| `--log-file FILE` | Write logs to file |
+| `--log-level LEVEL` | Log verbosity (trace/debug/info/warn/error) |
 
 ### Workflow
 | Flag | Description |
@@ -230,99 +271,84 @@ Example: "Add user authentication" becomes `ralphy/add-user-authentication`
 ## Examples
 
 ```bash
-# Basic usage
-./ralphy.sh
+# JSON PRD with parallel execution
+./ralphy.sh --json prd.json --parallel --max-parallel 4
 
-# Basic usage with Codex
-./ralphy.sh --codex
+# YAML tasks with auto-PRs
+./ralphy.sh --yaml tasks.yaml --create-pr
 
-# Fast mode with OpenCode
-./ralphy.sh --opencode --fast
+# GitHub issues with Cursor
+./ralphy.sh --github myorg/myrepo --cursor --parallel
 
-# Use Cursor agent
-./ralphy.sh --cursor
+# Feature branch workflow with logging
+./ralphy.sh --branch-per-task --create-pr --base-branch main --log-file session.log
 
-# Cursor with parallel execution
-./ralphy.sh --cursor --parallel --max-parallel 4
-
-# Use Qwen-Code
-./ralphy.sh --qwen
-
-# Parallel with 4 agents and auto-PRs
-./ralphy.sh --parallel --max-parallel 4 --create-pr
-
-# GitHub issues with parallel execution
-./ralphy.sh --github myorg/myrepo --parallel
-
-# Feature branch workflow
-./ralphy.sh --branch-per-task --create-pr --base-branch main
-
-# Limited iterations with draft PRs
-./ralphy.sh --max-iterations 5 --branch-per-task --create-pr --draft-pr
-
-# Preview what would happen
-./ralphy.sh --dry-run --verbose
+# Debug mode
+./ralphy.sh --json prd.json --log-level debug --dry-run
 ```
 
-## Progress Display
+## Documentation
 
-While running, you'll see:
-- A spinner with the current step (Thinking, Reading, Implementing, Testing, Committing)
-- The current task name
-- Elapsed time
+- [docs/prd-format.md](docs/prd-format.md) - JSON PRD schema and examples
+- [docs/yaml-format.md](docs/yaml-format.md) - YAML format documentation
+- [docs/formats.md](docs/formats.md) - Format comparison guide
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Planned enhancements
 
-In parallel mode:
-- Number of agents setting up, running, done, and failed
-- Final results with branch names
-- Error logs for any failed agents
+## Roadmap
 
-## Cost Tracking
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned enhancements including:
+- Auto-use `branchName` from PRD
+- Completion criteria execution
+- Task dependency enforcement
+- Priority-based task selection
+- Reference document loading
+- And more...
 
-At completion, Ralphy shows different metrics depending on the AI engine:
+## Testing
 
-| Engine | Metrics Shown |
-|--------|---------------|
-| Claude Code | Input/output tokens, estimated cost |
-| OpenCode | Input/output tokens, actual cost |
-| Codex | Input/output tokens (if provided) |
-| Cursor | Total API duration (tokens not available) |
+```bash
+# Run test suite
+./tests/test_ralphy.sh
+```
 
-All engines show branches created (if using `--branch-per-task`).
+The test suite validates:
+- CLI options and help output
+- JSON/YAML schema validity
+- Log level handling
+- Documentation completeness
+- No hardcoded references
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `./tests/test_ralphy.sh`
+4. Submit a pull request
+
+## Credits
+
+RalfPretzel is a fork of [michaelshimeles/ralphy](https://github.com/michaelshimeles/ralphy), enhanced with:
+- JSON PRD support with comprehensive schema
+- 5-level logging system with file output
+- YAML and JSON schema definitions
+- Comprehensive documentation
+- Automated test suite
+- Bug fixes for parallel execution and branch handling
 
 ## Changelog
 
-### v3.2.0
-- Added Qwen-Code support (`--qwen` flag)
+### RalfPretzel v1.0.0 (Fork)
+- Added JSON PRD support with rich schema (`--json`)
+- Added comprehensive logging system (`--log-file`, `--log-level`)
+- Added JSON Schema for PRD validation
+- Added YAML Schema for task file validation
+- Added format comparison documentation
+- Added test suite (24+ tests)
+- Fixed parallel_group handling with BASE_BRANCH
+- Fixed various edge cases from Greptile review
 
-### v3.1.0
-- Added Cursor agent support (`--cursor` or `--agent` flag)
-- Cursor uses `--print --force` flags for non-interactive execution
-- Track API duration for Cursor (token counts not available in Cursor CLI)
-- Improved task completion verification (checks actual PRD state, not just AI output)
-- Fixed display issues with task counts
-
-### v3.0.1
-- Parallel agents now run in isolated git worktrees
-- Auto-merge branches when not using `--create-pr`
-- AI-powered merge conflict resolution
-- Real-time parallel status display (setup/running/done/failed)
-- Show error logs for failed agents
-- Improved worktree creation with detailed logging
-
-### v3.0.0
-- Added parallel task execution (`--parallel`, `--max-parallel`)
-- Added git branch per task (`--branch-per-task`, `--create-pr`, `--draft-pr`)
-- Added multiple PRD formats (Markdown, YAML, GitHub Issues)
-- Added YAML parallel groups
-
-### v2.0.0
-- Added OpenCode support (`--opencode`)
-- Added retry logic
-- Added `--max-iterations`, `--dry-run`, `--verbose`
-- Cross-platform notifications
-
-### v1.0.0
-- Initial release
+### Upstream Changes (v3.2.0 and earlier)
+See the [original changelog](https://github.com/michaelshimeles/ralphy#changelog) for upstream history.
 
 ## License
 
