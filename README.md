@@ -10,7 +10,7 @@
 
 # RalfPretzel
 
-> *Like a pretzel's infinite loop, RalfPretzel keeps working until every task is done.*
+> *Have a pretzel and loop as much as you like!*
 
 An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Code, OpenCode, Codex, Cursor, Qwen, or Factory Droid) to work through tasks until everything is complete.
 
