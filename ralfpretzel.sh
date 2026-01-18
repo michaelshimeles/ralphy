@@ -268,7 +268,7 @@ show_help() {
 ${BOLD}Ralphy${RESET} - Autonomous AI Coding Loop (v${VERSION})
 
 ${BOLD}USAGE:${RESET}
-  ./ralphy.sh [options]
+  ./ralfpretzel.sh [options]
 
 ${BOLD}AI ENGINE OPTIONS:${RESET}
   --claude            Use Claude Code (default)
@@ -317,15 +317,15 @@ ${BOLD}OTHER OPTIONS:${RESET}
   --version           Show version number
 
 ${BOLD}EXAMPLES:${RESET}
-  ./ralphy.sh                              # Run with Claude Code
-  ./ralphy.sh --codex                      # Run with Codex CLI
-  ./ralphy.sh --opencode                   # Run with OpenCode
-  ./ralphy.sh --cursor                     # Run with Cursor agent
-  ./ralphy.sh --branch-per-task --create-pr  # Feature branch workflow
-  ./ralphy.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
-  ./ralphy.sh --yaml tasks.yaml            # Use YAML task file
-  ./ralphy.sh --json prd.json              # Use JSON PRD file
-  ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
+  ./ralfpretzel.sh                              # Run with Claude Code
+  ./ralfpretzel.sh --codex                      # Run with Codex CLI
+  ./ralfpretzel.sh --opencode                   # Run with OpenCode
+  ./ralfpretzel.sh --cursor                     # Run with Cursor agent
+  ./ralfpretzel.sh --branch-per-task --create-pr  # Feature branch workflow
+  ./ralfpretzel.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
+  ./ralfpretzel.sh --yaml tasks.yaml            # Use YAML task file
+  ./ralfpretzel.sh --json prd.json              # Use JSON PRD file
+  ./ralfpretzel.sh --github owner/repo          # Fetch from GitHub issues
 
 ${BOLD}PRD FORMATS:${RESET}
   Markdown (PRD.md):
@@ -963,16 +963,16 @@ get_prd_context() {
 
 create_task_branch() {
   local task=$1
-  local branch_name="ralphy/$(slugify "$task")"
+  local branch_name="ralfpretzel/$(slugify "$task")"
   
   log_debug "Creating branch: $branch_name from $BASE_BRANCH"
   
   # Stash any changes (only pop if a new stash was created)
   local stash_before stash_after stashed=false
   stash_before=$(git stash list -1 --format='%gd %s' 2>/dev/null || true)
-  git stash push -m "ralphy-autostash" >/dev/null 2>&1 || true
+  git stash push -m "ralfpretzel-autostash" >/dev/null 2>&1 || true
   stash_after=$(git stash list -1 --format='%gd %s' 2>/dev/null || true)
-  if [[ -n "$stash_after" ]] && [[ "$stash_after" != "$stash_before" ]] && [[ "$stash_after" == *"ralphy-autostash"* ]]; then
+  if [[ -n "$stash_after" ]] && [[ "$stash_after" != "$stash_before" ]] && [[ "$stash_after" == *"ralfpretzel-autostash"* ]]; then
     stashed=true
   fi
   
@@ -1621,7 +1621,7 @@ run_single_task() {
 create_agent_worktree() {
   local task_name="$1"
   local agent_num="$2"
-  local branch_name="ralphy/agent-${agent_num}-$(slugify "$task_name")"
+  local branch_name="ralfpretzel/agent-${agent_num}-$(slugify "$task_name")"
   local worktree_dir="${WORKTREE_BASE}/agent-${agent_num}"
   
   # Run git commands from original directory
@@ -2149,7 +2149,7 @@ run_parallel_tasks() {
 
     # NOTE: Uses git branch instead of git checkout to avoid changing HEAD while worktrees are active (Greptile review)
     if [[ "$PRD_SOURCE" == "yaml" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
-      local integration_branch="ralphy/integration-group-$group"
+      local integration_branch="ralfpretzel/integration-group-$group"
       log_info "Creating integration branch: $integration_branch"
       log_info "Will merge ${#group_completed_branches[@]} branches into it"
       log_structured "integration_start" "group" "$group" "integration_branch" "$integration_branch" "branch_count" "${#group_completed_branches[@]}"
