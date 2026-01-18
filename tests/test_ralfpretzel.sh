@@ -604,3 +604,71 @@ else
   fail "Banner missing disable option"
 fi
 
+echo ""
+echo "--- Upstream Merge Tests (0.9.2) ---"
+
+# Test: Factory Droid flag acceptance
+if "$RALPHY" --droid --help >/dev/null 2>&1; then
+  pass "Factory Droid flag accepted"
+else
+  fail "Factory Droid flag not accepted"
+fi
+
+# Test: Factory Droid in help text
+if "$RALPHY" --help 2>&1 | grep -qi "droid"; then
+  pass "Help shows Factory Droid option"
+else
+  fail "Help missing Factory Droid option"
+fi
+
+# Test: Factory Droid CLI validation exists
+if grep -A 2 "droid)" ../ralfpretzel.sh | grep -q "command -v droid"; then
+  pass "Factory Droid CLI validation exists"
+else
+  fail "Factory Droid CLI validation missing"
+fi
+
+# Test: Arithmetic increment safety (|| true added)
+# Check for at least 10 instances of ((.*++)) || true
+increment_count=$(grep -c '((.*++)) || true' ../ralfpretzel.sh || echo 0)
+if [[ $increment_count -ge 10 ]]; then
+  pass "Arithmetic increment safety applied ($increment_count instances)"
+else
+  fail "Arithmetic increment safety incomplete ($increment_count instances, expected >=10)"
+fi
+
+# Test: Detached HEAD handling (git symbolic-ref used)
+if grep -q "git symbolic-ref --short HEAD" ../ralfpretzel.sh; then
+  pass "Detached HEAD handling uses symbolic-ref"
+else
+  fail "Detached HEAD handling missing symbolic-ref"
+fi
+
+# Test: BASE_BRANCH logging clarity
+if grep -q 'current BASE_BRANCH (\$BASE_BRANCH)' ../ralfpretzel.sh; then
+  pass "BASE_BRANCH logging clarity fixed"
+else
+  fail "BASE_BRANCH logging clarity not fixed"
+fi
+
+# Test: Force delete for agent branches (git branch -D)
+if grep -q 'git branch -D "\$branch"' ../ralfpretzel.sh; then
+  pass "Force delete for merged agent branches"
+else
+  fail "Force delete for agent branches not implemented"
+fi
+
+# Test: ORIGINAL_BASE_BRANCH fallback exists
+if grep -q 'git checkout "\$ORIGINAL_BASE_BRANCH"' ../ralfpretzel.sh; then
+  pass "ORIGINAL_BASE_BRANCH fallback exists"
+else
+  fail "ORIGINAL_BASE_BRANCH fallback missing"
+fi
+
+# Test: Factory Droid parsing logic exists
+if grep -q '"type":"completion"' ../ralfpretzel.sh; then
+  pass "Factory Droid result parsing exists"
+else
+  fail "Factory Droid result parsing missing"
+fi
+

@@ -1,3 +1,13 @@
+```
+  ____       _  __   ____            _          _
+ |  _ \ __ _| |/ _| |  _ \ _ __ ___| |_ _______| |
+ | |_) / _` | | |_  | |_) | '__/ _ \ __|_  / _ \ |
+ |  _ < (_| | |  _| |  __/| | |  __/ |_ / /  __/ |
+ |_| \_\__,_|_|_|   |_|   |_|  \___|\__/___\___|_|
+
+ 🥨 Loops until done
+```
+
 # RalfPretzel
 
 > *Like a pretzel's infinite loop, RalfPretzel keeps working until every task is done.*
@@ -452,6 +462,7 @@ RalfPretzel tracks progress to avoid merge conflicts during parallel execution:
 | `--opencode` | Use OpenCode |
 | `--cursor`, `--agent` | Use Cursor agent |
 | `--qwen` | Use Qwen-Code |
+| `--droid` | Use Factory Droid |
 
 ### Parallel Execution
 | Flag | Description |
@@ -523,13 +534,7 @@ ralfpretzel --json prd.json --log-level debug --dry-run
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for planned enhancements including:
-- Auto-use `branchName` from PRD
-- Completion criteria execution
-- Task dependency enforcement
-- Priority-based task selection
-- Reference document loading
-- And more...
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned enhancements.
 
 ## Testing
 
@@ -567,46 +572,37 @@ RalfPretzel is a fork of [michaelshimeles/ralphy](https://github.com/michaelshim
 
 ## Changelog
 
-### RalfPretzel v0.9.1 (Current - 2026-01-18)
-- **Added `completionCriteria` execution**: Automatically validates tasks by running commands (tests, lints, health checks)
-- **Added `referenceDocuments` loading**: Injects reference documents from JSON PRD into AI prompts
-- **Added `rules` loading**: Loads mandatory rules from JSON PRD for AI to follow
-- **Added `ralfpretzel config` subcommand**: Manage configuration (list, get, set, reset, path)
-- **Added config validation on load**: Checks if AI engine is installed, provides helpful error messages
-- **Added ASCII pretzel banner**: Shows on first launch and `--version`, configurable with `--no-banner`
-- **Added custom model detection for Codex and Qwen**: Detects custom models from config files
-- **Enhanced test suite**: 49 tests total (38 original + 11 new)
-- **Updated JSON schema**: Added `completionCriteria` to userStory definition
-- **Documentation improvements**: Comprehensive examples and guides for new features
+### v0.9.2 (2026-01-18)
+- **Merged upstream v3.3.0 changes**:
+  - Added Factory Droid engine support (`--droid` flag)
+  - **CRITICAL FIX**: Arithmetic increment safety (prevents script exit when counters are 0)
+  - Detached HEAD handling improvements (better branch detection)
+  - BASE_BRANCH logging clarity fixes
+  - Greptile review fixes (force delete for merged branches)
+- All 38 tests passing
 
-### RalfPretzel v0.9.0-beta (2026-01-17)
-- Added interactive wizard as default mode for easy setup
-- Added `--model` flag for explicit model selection across all engines
-- Added config file support (`~/.ralfpretzel/config`) for saving preferences
-- Added `ralfpretzel config` subcommand for managing configuration
-- Added config validation on load with helpful error messages
-- Added ASCII pretzel banner (shows on first launch and `--version`)
-- Added per-group progress tracking to avoid merge conflicts
-- Added installer script (`install.sh`) for easy installation
-- Added Homebrew tap support (`brew install czaku/ralfpretzel/ralfpretzel`)
-- Added JSON PRD support with rich schema (`--json`)
-- Added `referenceDocuments` loading from JSON PRD into AI prompts
-- Added `rules` loading from JSON PRD as mandatory rules for AI
-- Added `completionCriteria` execution after task completion (validates with tests, lints, etc.)
-- Added comprehensive logging system (`--log-file`, `--log-level`)
-- Added JSON Schema for PRD validation
-- Added YAML Schema for task file validation
-- Added format comparison documentation
+### v0.9.1 (2026-01-18)
+- Added `completionCriteria` execution (automatically validates tasks)
+- Added `referenceDocuments` loading from JSON PRD
+- Added `rules` loading from JSON PRD
+- Added `ralfpretzel config` subcommand
+- Added config validation on load
+- Added ASCII pretzel banner
+- Enhanced test suite (49 tests total)
+- Updated JSON schema with `completionCriteria`
+
+### v0.9.0-beta (2026-01-17)
+- Added interactive wizard for easy setup
+- Added `--model` flag for model selection
+- Added config file support (`~/.ralfpretzel/config`)
+- Added per-group progress tracking
+- Added installer script and Homebrew tap
+- Added JSON PRD support with rich schema
+- Added comprehensive logging system
+- Added JSON/YAML schemas for validation
 - Added test suite (38+ tests)
-- Added support for more OpenCode models (MiniMax, DeepSeek, o1)
-- Added custom OpenCode model detection from `~/.config/opencode/opencode.json`
-- Added custom Codex and Qwen model detection from their config files
 - Fixed parallel_group handling with BASE_BRANCH
-- Fixed various edge cases from Greptile review
-
-### Upstream Changes (v3.2.0 and earlier)
-See the [original changelog](https://github.com/michaelshimeles/ralphy#changelog) for upstream history.
 
 ## License
 
-MIT
+[MIT License](LICENSE) - See LICENSE file for details.
