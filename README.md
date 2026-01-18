@@ -17,6 +17,57 @@ An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Co
 | **Test Suite** | None | 24+ automated tests |
 | **Bug Fixes** | - | parallel_group fixes, BASE_BRANCH handling, edge cases |
 
+## Installation
+
+### Quick Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/czaku/ralfpretzel/main/install.sh | bash
+```
+
+This installs `ralfpretzel` to `~/.local/bin`. The installer will guide you through adding it to your PATH if needed.
+
+### Homebrew (macOS/Linux)
+
+```bash
+# Add the tap
+brew tap czaku/ralfpretzel
+
+# Install
+brew install ralfpretzel
+```
+
+Or in one command:
+```bash
+brew install czaku/ralfpretzel/ralfpretzel
+```
+
+### Manual Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/czaku/ralfpretzel.git
+cd ralfpretzel
+
+# Option 1: Run directly
+chmod +x ralfpretzel.sh
+./ralfpretzel.sh --help
+
+# Option 2: Install to PATH
+cp ralfpretzel.sh ~/.local/bin/ralfpretzel
+chmod +x ~/.local/bin/ralfpretzel
+```
+
+### Uninstall
+
+```bash
+# If installed via install.sh
+curl -fsSL https://raw.githubusercontent.com/czaku/ralfpretzel/main/install.sh | bash -s -- --uninstall
+
+# If installed via Homebrew
+brew uninstall ralfpretzel
+```
+
 ## What It Does
 
 1. Reads tasks from a **JSON PRD**, YAML file, Markdown PRD, or GitHub Issues
@@ -27,16 +78,14 @@ An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Co
 ## Quick Start
 
 ```bash
-# Clone RalfPretzel
-git clone https://github.com/czaku/ralfpretzel.git
-cd ralfpretzel
-chmod +x ralfpretzel.sh
-
 # Simple: Markdown PRD
 ralfpretzel --prd PRD.md
 
 # Better: JSON PRD with rich context
 ralfpretzel --json prd.json
+
+# YAML task file
+ralfpretzel --yaml tasks.yaml
 ```
 
 ## Requirements
@@ -338,6 +387,8 @@ RalfPretzel is a fork of [michaelshimeles/ralphy](https://github.com/michaelshim
 ## Changelog
 
 ### RalfPretzel v1.0.0 (Fork)
+- Added installer script (`install.sh`) for easy installation
+- Added Homebrew tap support (`brew install czaku/ralfpretzel/ralfpretzel`)
 - Added JSON PRD support with rich schema (`--json`)
 - Added comprehensive logging system (`--log-file`, `--log-level`)
 - Added JSON Schema for PRD validation
