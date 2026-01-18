@@ -302,7 +302,7 @@ ${BOLD}GIT BRANCH OPTIONS:${RESET}
 ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --prd FILE          PRD file path (default: PRD.md)
   --yaml FILE         Use YAML task file instead of markdown
-  --json FILE         Use JSON PRD file (FitKind/snarktank format)
+  --json FILE         Use JSON PRD file (extended JSON format)
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
 
@@ -338,7 +338,7 @@ ${BOLD}PRD FORMATS:${RESET}
         completed: false
         parallel_group: 1  # Optional: tasks with same group run in parallel
 
-  JSON (prd.json) - FitKind/snarktank format:
+  JSON (prd.json) - Extended JSON format:
     {
       "branchName": "feature/name",
       "userStories": [
@@ -742,7 +742,7 @@ get_tasks_in_group_yaml() {
 }
 
 # ============================================
-# TASK SOURCES - JSON PRD (FitKind format)
+# TASK SOURCES - JSON PRD (extended format)
 # ============================================
 
 # Get all incomplete tasks from JSON PRD
