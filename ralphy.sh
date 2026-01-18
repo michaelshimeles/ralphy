@@ -1137,6 +1137,8 @@ run_single_task() {
 
   # Run with retry logic
   while [[ $retry_count -lt $MAX_RETRIES ]]; do
+    ((retry_count++)) || true
+
     # Start AI command
     run_ai_command "$prompt" "$tmpfile"
 
@@ -1162,7 +1164,6 @@ run_single_task() {
 
     # Check for empty response
     if [[ -z "$result" ]]; then
-      ((retry_count++))
       log_error "Empty response (attempt $retry_count/$MAX_RETRIES)"
       if [[ $retry_count -lt $MAX_RETRIES ]]; then
         log_info "Retrying in ${RETRY_DELAY}s..."
@@ -1178,7 +1179,6 @@ run_single_task() {
     # Check for API errors
     local error_msg
     if ! error_msg=$(check_for_errors "$result"); then
-      ((retry_count++))
       log_error "API error: $error_msg (attempt $retry_count/$MAX_RETRIES)"
       if [[ $retry_count -lt $MAX_RETRIES ]]; then
         log_info "Retrying in ${RETRY_DELAY}s..."
@@ -1616,7 +1616,7 @@ run_parallel_tasks() {
       for ((i = batch_start; i < batch_end; i++)); do
         local task="${tasks[$i]}"
         local agent_num=$((iteration + 1))
-        ((iteration++))
+        ((iteration++)) || true
 
         local status_file=$(mktemp)
         local output_file=$(mktemp)
@@ -2068,7 +2068,7 @@ main() {
 
   # Sequential main loop
   while true; do
-    ((iteration++))
+    ((iteration++)) || true
     local result_code=0
     run_single_task "" "$iteration" || result_code=$?
     
