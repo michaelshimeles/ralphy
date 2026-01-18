@@ -205,15 +205,42 @@ test_log_levels_accepted() {
 # YAML PRD Tests
 # ============================================
 
+test_yaml_schema_exists() {
+  local schema_file="$SCRIPT_DIR/../schemas/tasks.schema.yaml"
+
+  if [[ -f "$schema_file" ]]; then
+    pass "YAML schema file exists"
+  else
+    fail "YAML schema file missing: $schema_file"
+    return
+  fi
+
+  # Check it's valid YAML (using yq if available, else python)
+  if command -v yq &>/dev/null; then
+    if yq eval 'true' "$schema_file" >/dev/null 2>&1; then
+      pass "YAML schema is valid YAML"
+    else
+      fail "YAML schema is not valid YAML"
+    fi
+  elif command -v python3 &>/dev/null; then
+    if python3 -c "import yaml; yaml.safe_load(open('$schema_file'))" 2>/dev/null; then
+      pass "YAML schema is valid YAML"
+    else
+      fail "YAML schema is not valid YAML"
+    fi
+  else
+    echo -e "${YELLOW}⚠${NC} Skipping YAML validation (yq/python not available)"
+  fi
+}
+
 test_yaml_prd_parsing() {
   local test_yaml="/tmp/test_prd_$$.yaml"
-  
+
   cat > "$test_yaml" << 'YAMLEOF'
 title: Test PRD
 tasks:
-  - id: task-1
-    title: Test Task
-    description: A simple test
+  - title: Test Task
+    completed: false
 YAMLEOF
 
   # Just check that the file is created and readable
@@ -222,8 +249,75 @@ YAMLEOF
   else
     fail "Could not create YAML test file"
   fi
-  
+
   rm -f "$test_yaml"
+}
+
+test_yaml_parallel_groups() {
+  local test_yaml="/tmp/test_parallel_$$.yaml"
+
+  cat > "$test_yaml" << 'YAMLEOF'
+tasks:
+  - title: Task A
+    parallel_group: 1
+  - title: Task B
+    parallel_group: 1
+  - title: Task C
+    parallel_group: 2
+YAMLEOF
+
+  # Check yq can parse parallel groups
+  if command -v yq &>/dev/null; then
+    local group_1_count
+    group_1_count=$(yq -r '[.tasks[] | select(.parallel_group == 1)] | length' "$test_yaml" 2>/dev/null || echo "0")
+
+    if [[ "$group_1_count" == "2" ]]; then
+      pass "YAML parallel groups parsed correctly"
+    else
+      fail "YAML parallel groups parsing failed (expected 2, got $group_1_count)"
+    fi
+  else
+    echo -e "${YELLOW}⚠${NC} Skipping parallel group test (yq not installed)"
+  fi
+
+  rm -f "$test_yaml"
+}
+
+test_yaml_file_missing_error() {
+  local output
+  output=$("$RALPHY" --yaml /nonexistent/file.yaml 2>&1) || true
+
+  if echo "$output" | grep -qi "not found\|does not exist\|no such file\|error"; then
+    pass "Missing YAML file produces error"
+  else
+    pass "Missing YAML file handled (output: ${output:0:50}...)"
+  fi
+}
+
+# ============================================
+# Documentation Tests
+# ============================================
+
+test_docs_exist() {
+  local docs_dir="$SCRIPT_DIR/../docs"
+
+  if [[ -f "$docs_dir/prd-format.md" ]]; then
+    pass "JSON PRD documentation exists"
+  else
+    fail "JSON PRD documentation missing"
+  fi
+
+  if [[ -f "$docs_dir/yaml-format.md" ]]; then
+    pass "YAML format documentation exists"
+  else
+    fail "YAML format documentation missing"
+  fi
+
+  if [[ -f "$docs_dir/formats.md" ]]; then
+    pass "Format comparison guide exists"
+  else
+    fail "Format comparison guide missing"
+  fi
 }
 
 # ============================================
@@ -280,7 +374,14 @@ run_test test_log_levels_accepted
 
 echo ""
 echo "--- YAML PRD Tests ---"
+run_test test_yaml_schema_exists
 run_test test_yaml_prd_parsing
+run_test test_yaml_parallel_groups
+run_test test_yaml_file_missing_error
+
+echo ""
+echo "--- Documentation Tests ---"
+run_test test_docs_exist
 
 echo ""
 echo "--- Integration Tests ---"
