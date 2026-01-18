@@ -1560,10 +1560,14 @@ run_parallel_tasks() {
   fi
   export BASE_BRANCH
   log_info "Base branch: $BASE_BRANCH"
-  
+
+  # Store original base branch for final merge (addresses Greptile review)
+  local ORIGINAL_BASE_BRANCH="$BASE_BRANCH"
+  local integration_branches=()  # Track integration branches for cleanup
+
   # Export variables needed by subshell agents
   export AI_ENGINE MAX_RETRIES RETRY_DELAY PRD_SOURCE PRD_FILE CREATE_PR PR_DRAFT
-  
+
   local batch_num=0
   local completed_branches=()
   local groups=("all")
@@ -1786,33 +1790,49 @@ run_parallel_tasks() {
 
     # After each parallel_group completes, merge branches into integration branch
     # so the next group sees the completed work (fixes issue #13)
+    # NOTE: Uses git branch instead of git checkout to avoid changing HEAD while worktrees are active (Greptile review)
     if [[ "$PRD_SOURCE" == "yaml" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
       local integration_branch="ralphy/integration-group-$group"
       log_info "Creating integration branch for group $group: $integration_branch"
 
-      # Create integration branch from current BASE_BRANCH
-      if git checkout -b "$integration_branch" "$BASE_BRANCH" >/dev/null 2>&1; then
+      # Create integration branch from current BASE_BRANCH without switching HEAD
+      # This avoids state confusion while worktrees are active
+      if git branch "$integration_branch" "$BASE_BRANCH" >/dev/null 2>&1; then
         local merge_failed=false
+        local current_head
+        current_head=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
-        for branch in "${group_completed_branches[@]}"; do
-          log_debug "Merging $branch into $integration_branch"
-          if ! git merge --no-edit "$branch" >/dev/null 2>&1; then
-            log_warn "Conflict merging $branch into integration branch"
-            merge_failed=true
-            break
+        # Temporarily checkout the integration branch to perform merges
+        if git checkout "$integration_branch" >/dev/null 2>&1; then
+          for branch in "${group_completed_branches[@]}"; do
+            log_debug "Merging $branch into $integration_branch"
+            if ! git merge --no-edit "$branch" >/dev/null 2>&1; then
+              log_warn "Conflict merging $branch into integration branch"
+              # Abort the merge to leave branch in clean state (Greptile review)
+              git merge --abort >/dev/null 2>&1 || true
+              merge_failed=true
+              break
+            fi
+          done
+
+          # Return to original HEAD to avoid state confusion
+          git checkout "$current_head" >/dev/null 2>&1 || git checkout "$BASE_BRANCH" >/dev/null 2>&1 || true
+
+          if [[ "$merge_failed" == false ]]; then
+            # Update BASE_BRANCH for next group
+            BASE_BRANCH="$integration_branch"
+            export BASE_BRANCH
+            integration_branches+=("$integration_branch")  # Track for cleanup
+            log_info "Updated BASE_BRANCH to $integration_branch for next group"
+          else
+            # Delete failed integration branch
+            git branch -D "$integration_branch" >/dev/null 2>&1 || true
+            log_warn "Integration merge failed; next group will branch from original BASE_BRANCH"
           fi
-        done
-
-        if [[ "$merge_failed" == false ]]; then
-          # Update BASE_BRANCH for next group
-          BASE_BRANCH="$integration_branch"
-          export BASE_BRANCH
-          log_info "Updated BASE_BRANCH to $integration_branch for next group"
         else
-          # Rollback to original BASE_BRANCH on failure
-          git checkout "$BASE_BRANCH" >/dev/null 2>&1 || true
+          # Couldn't checkout, clean up the branch
           git branch -D "$integration_branch" >/dev/null 2>&1 || true
-          log_warn "Integration merge failed; next group will branch from original BASE_BRANCH"
+          log_warn "Could not checkout integration branch; next group will branch from original BASE_BRANCH"
         fi
       else
         log_warn "Could not create integration branch; next group will branch from original BASE_BRANCH"
@@ -1835,7 +1855,7 @@ run_parallel_tasks() {
   if [[ ${#completed_branches[@]} -gt 0 ]]; then
     echo ""
     echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    
+
     if [[ "$CREATE_PR" == true ]]; then
       # PRs were created, just show the branches
       echo "${BOLD}Branches created by agents:${RESET}"
@@ -1843,19 +1863,65 @@ run_parallel_tasks() {
         echo "  ${CYAN}•${RESET} $branch"
       done
     else
-      # Auto-merge branches back to main
-      echo "${BOLD}Merging agent branches into ${BASE_BRANCH}...${RESET}"
+      # Auto-merge branches into ORIGINAL base branch (not integration branches)
+      # This addresses Greptile review: final merge should use original base, not integration branch
+      local final_target="$ORIGINAL_BASE_BRANCH"
+
+      # If we used integration branches, the final integration branch contains all the work
+      # We just need to merge the final integration branch into the original base
+      if [[ ${#integration_branches[@]} -gt 0 ]]; then
+        local final_integration="${integration_branches[-1]}"  # Last integration branch
+        echo "${BOLD}Merging integration branch into ${final_target}...${RESET}"
+        echo ""
+
+        if ! git checkout "$final_target" >/dev/null 2>&1; then
+          log_warn "Could not checkout $final_target; leaving integration branch unmerged."
+          echo "${BOLD}Integration branch: ${CYAN}$final_integration${RESET}"
+          return 0
+        fi
+
+        printf "  Merging ${CYAN}%s${RESET}..." "$final_integration"
+        if git merge --no-edit "$final_integration" >/dev/null 2>&1; then
+          printf " ${GREEN}✓${RESET}\n"
+
+          # Cleanup all integration branches after successful merge (Greptile review)
+          echo ""
+          echo "${DIM}Cleaning up integration branches...${RESET}"
+          for int_branch in "${integration_branches[@]}"; do
+            git branch -D "$int_branch" >/dev/null 2>&1 && \
+              echo "  ${DIM}Deleted ${int_branch}${RESET}" || true
+          done
+
+          # Also cleanup the individual agent branches that were merged into integration
+          echo "${DIM}Cleaning up agent branches...${RESET}"
+          for branch in "${completed_branches[@]}"; do
+            git branch -d "$branch" >/dev/null 2>&1 && \
+              echo "  ${DIM}Deleted ${branch}${RESET}" || true
+          done
+        else
+          printf " ${YELLOW}conflict${RESET}\n"
+          git merge --abort >/dev/null 2>&1 || true
+          log_warn "Could not merge integration branch; leaving branches for manual resolution."
+          echo "${BOLD}Integration branch: ${CYAN}$final_integration${RESET}"
+          echo "${BOLD}Original base: ${CYAN}$final_target${RESET}"
+        fi
+
+        return 0
+      fi
+
+      # No integration branches - merge individual agent branches directly
+      echo "${BOLD}Merging agent branches into ${final_target}...${RESET}"
       echo ""
 
-      if ! git checkout "$BASE_BRANCH" >/dev/null 2>&1; then
-        log_warn "Could not checkout $BASE_BRANCH; leaving agent branches unmerged."
+      if ! git checkout "$final_target" >/dev/null 2>&1; then
+        log_warn "Could not checkout $final_target; leaving agent branches unmerged."
         echo "${BOLD}Branches created by agents:${RESET}"
         for branch in "${completed_branches[@]}"; do
           echo "  ${CYAN}•${RESET} $branch"
         done
         return 0
       fi
-      
+
       local merge_failed=()
       
       for branch in "${completed_branches[@]}"; do
