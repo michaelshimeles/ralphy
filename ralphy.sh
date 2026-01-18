@@ -25,6 +25,12 @@ MAX_RETRIES=3
 RETRY_DELAY=5
 VERBOSE=false
 
+# Logging configuration
+LOG_LEVEL="${LOG_LEVEL:-info}"  # trace, debug, info, warn, error
+LOG_FILE=""                      # Empty = no file logging
+LOG_FILE_LEVEL="${LOG_FILE_LEVEL:-debug}"  # File gets more detail by default
+LOG_TIMESTAMPS=true              # Include timestamps in logs
+
 # Git branch options
 BRANCH_PER_TASK=false
 CREATE_PR=false
@@ -74,30 +80,180 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 
 # ============================================
-# UTILITY FUNCTIONS
+# LOGGING SYSTEM
 # ============================================
 
-log_info() {
-  echo "${BLUE}[INFO]${RESET} $*"
+# Log level priorities (lower = more verbose)
+# Note: Declared later to avoid unbound variable issues with set -u
+LOG_LEVEL_TRACE=0
+LOG_LEVEL_DEBUG=1
+LOG_LEVEL_INFO=2
+LOG_LEVEL_WARN=3
+LOG_LEVEL_ERROR=4
+
+# Get numeric log level
+get_log_level_num() {
+  case "$1" in
+    trace) echo $LOG_LEVEL_TRACE ;;
+    debug) echo $LOG_LEVEL_DEBUG ;;
+    info)  echo $LOG_LEVEL_INFO ;;
+    warn)  echo $LOG_LEVEL_WARN ;;
+    error) echo $LOG_LEVEL_ERROR ;;
+    *)     echo $LOG_LEVEL_INFO ;;
+  esac
 }
 
-log_success() {
-  echo "${GREEN}[OK]${RESET} $*"
+# Check if we should log at this level (for terminal)
+should_log() {
+  local level="$1"
+  local current_level_num=$(get_log_level_num "$LOG_LEVEL")
+  local message_level_num=$(get_log_level_num "$level")
+  [[ $message_level_num -ge $current_level_num ]]
 }
 
-log_warn() {
-  echo "${YELLOW}[WARN]${RESET} $*"
+# Check if we should log to file at this level
+should_log_file() {
+  local level="$1"
+  [[ -n "$LOG_FILE" ]] || return 1
+  local file_level_num=$(get_log_level_num "$LOG_FILE_LEVEL")
+  local message_level_num=$(get_log_level_num "$level")
+  [[ $message_level_num -ge $file_level_num ]]
 }
 
-log_error() {
-  echo "${RED}[ERROR]${RESET} $*" >&2
+# Get timestamp for logging
+log_timestamp() {
+  if [[ "$LOG_TIMESTAMPS" == true ]]; then
+    date '+%Y-%m-%d %H:%M:%S'
+  else
+    echo ""
+  fi
+}
+
+# Strip ANSI color codes for file logging
+strip_colors() {
+  echo "$*" | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# Core logging function
+_log() {
+  local level="$1"
+  local color="$2"
+  local label="$3"
+  shift 3
+  local message="$*"
+  local timestamp=$(log_timestamp)
+
+  # Terminal output (with colors)
+  if should_log "$level"; then
+    if [[ -n "$timestamp" ]]; then
+      echo "${DIM}[$timestamp]${RESET} ${color}[$label]${RESET} $message"
+    else
+      echo "${color}[$label]${RESET} $message"
+    fi
+  fi
+
+  # File output (no colors, always timestamped)
+  if should_log_file "$level"; then
+    # Use portable timestamp (macOS doesn't support %N)
+    local file_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$file_timestamp] [$label] $(strip_colors "$message")" >> "$LOG_FILE"
+  fi
+}
+
+# Convenience log functions
+log_trace() {
+  _log "trace" "$DIM" "TRACE" "$@"
 }
 
 log_debug() {
-  if [[ "$VERBOSE" == true ]]; then
-    echo "${DIM}[DEBUG] $*${RESET}"
+  _log "debug" "$DIM" "DEBUG" "$@"
+}
+
+log_info() {
+  _log "info" "$BLUE" "INFO" "$@"
+}
+
+log_success() {
+  _log "info" "$GREEN" "OK" "$@"
+}
+
+log_warn() {
+  _log "warn" "$YELLOW" "WARN" "$@"
+}
+
+log_error() {
+  _log "error" "$RED" "ERROR" "$@" >&2
+}
+
+# Log to file only (for verbose data that would clutter terminal)
+log_file_only() {
+  local level="$1"
+  shift
+  if [[ -n "$LOG_FILE" ]]; then
+    local file_timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
+    echo "[$file_timestamp] [$level] $*" >> "$LOG_FILE"
   fi
 }
+
+# Log a section header (always visible, also to file)
+log_section() {
+  local title="$1"
+  local border="════════════════════════════════════════════════════════════"
+  echo ""
+  echo "${BOLD}╔${border}╗${RESET}"
+  echo "${BOLD}║  $title${RESET}"
+  echo "${BOLD}╚${border}╝${RESET}"
+
+  if [[ -n "$LOG_FILE" ]]; then
+    local file_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    {
+      echo ""
+      echo "[$file_timestamp] ========================================"
+      echo "[$file_timestamp] $title"
+      echo "[$file_timestamp] ========================================"
+    } >> "$LOG_FILE"
+  fi
+}
+
+# Log structured data (JSON-like, for file analysis)
+log_structured() {
+  local event="$1"
+  shift
+  if [[ -n "$LOG_FILE" ]]; then
+    local file_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local data=""
+    while [[ $# -gt 0 ]]; do
+      data="$data \"$1\": \"$2\","
+      shift 2
+    done
+    data="${data%,}"  # Remove trailing comma
+    echo "[$file_timestamp] [EVENT] {\"event\": \"$event\",$data }" >> "$LOG_FILE"
+  fi
+}
+
+# Initialize log file
+init_log_file() {
+  if [[ -n "$LOG_FILE" ]]; then
+    local log_dir=$(dirname "$LOG_FILE")
+    mkdir -p "$log_dir" 2>/dev/null || true
+
+    {
+      echo "========================================"
+      echo "Ralphy Log - Started $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "Version: $VERSION"
+      echo "Log Level (terminal): $LOG_LEVEL"
+      echo "Log Level (file): $LOG_FILE_LEVEL"
+      echo "========================================"
+      echo ""
+    } >> "$LOG_FILE"
+
+    log_info "Logging to file: $LOG_FILE"
+  fi
+}
+
+# ============================================
+# UTILITY FUNCTIONS
+# ============================================
 
 # Slugify text for branch names
 slugify() {
@@ -149,8 +305,14 @@ ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
 
+${BOLD}LOGGING OPTIONS:${RESET}
+  --log-file FILE     Write detailed logs to FILE
+  --log-level LEVEL   Terminal log level: trace, debug, info, warn, error (default: info)
+  --log-file-level L  File log level (default: debug - more verbose than terminal)
+  --no-timestamps     Disable timestamps in terminal output
+
 ${BOLD}OTHER OPTIONS:${RESET}
-  -v, --verbose       Show debug output
+  -v, --verbose       Show debug output (same as --log-level debug)
   -h, --help          Show this help
   --version           Show version number
 
@@ -190,6 +352,11 @@ show_version() {
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
+    # Skip empty arguments (can happen with malformed input)
+    if [[ -z "${1:-}" ]]; then
+      shift
+      continue
+    fi
     case $1 in
       --no-tests|--skip-tests)
         SKIP_TESTS=true
@@ -283,8 +450,25 @@ parse_args() {
         GITHUB_LABEL="${2:-}"
         shift 2
         ;;
+      --log-file)
+        LOG_FILE="${2:-}"
+        shift 2
+        ;;
+      --log-level)
+        LOG_LEVEL="${2:-info}"
+        shift 2
+        ;;
+      --log-file-level)
+        LOG_FILE_LEVEL="${2:-debug}"
+        shift 2
+        ;;
+      --no-timestamps)
+        LOG_TIMESTAMPS=false
+        shift
+        ;;
       -v|--verbose)
         VERBOSE=true
+        LOG_LEVEL="debug"
         shift
         ;;
       -h|--help)
@@ -1528,31 +1712,36 @@ Focus only on implementing: $task_name"
 }
 
 run_parallel_tasks() {
+  log_section "PARALLEL EXECUTION - Starting"
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-  
+  log_structured "parallel_start" "max_parallel" "$MAX_PARALLEL" "ai_engine" "$AI_ENGINE"
+
   local all_tasks=()
-  
+
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")
   done < <(get_all_tasks)
-  
+
   if [[ ${#all_tasks[@]} -eq 0 ]]; then
     log_info "No tasks to run"
     return 2
   fi
-  
+
   local total_tasks=${#all_tasks[@]}
   log_info "Found $total_tasks tasks to process"
-  
+  log_structured "tasks_found" "count" "$total_tasks" "source" "$PRD_SOURCE"
+
   # Store original directory for git operations from subshells
   ORIGINAL_DIR=$(pwd)
   export ORIGINAL_DIR
-  
+
   # Set up worktree base directory
   WORKTREE_BASE=$(mktemp -d)
   export WORKTREE_BASE
   log_debug "Worktree base: $WORKTREE_BASE"
+  log_file_only "DEBUG" "Original directory: $ORIGINAL_DIR"
+  log_file_only "DEBUG" "Worktree base: $WORKTREE_BASE"
   
   # Ensure we have a base branch set
   if [[ -z "$BASE_BRANCH" ]]; then
@@ -1583,6 +1772,10 @@ run_parallel_tasks() {
     local tasks=()
     local group_label=""
     local group_completed_branches=()  # Track branches completed in this group
+
+    log_section "PARALLEL GROUP $group - Starting"
+    log_info "BASE_BRANCH: $BASE_BRANCH"
+    log_structured "group_start" "group" "$group" "base_branch" "$BASE_BRANCH"
 
     if [[ "$PRD_SOURCE" == "yaml" ]]; then
       while IFS= read -r task; do
@@ -1790,29 +1983,51 @@ run_parallel_tasks() {
 
     # After each parallel_group completes, merge branches into integration branch
     # so the next group sees the completed work (fixes issue #13)
+    log_section "PARALLEL GROUP $group - Complete"
+    log_info "Completed branches: ${#group_completed_branches[@]}"
+    log_structured "group_complete" "group" "$group" "completed_branches" "${#group_completed_branches[@]}"
+
+    # Log all completed branches to file
+    for branch in "${group_completed_branches[@]}"; do
+      log_file_only "DEBUG" "Completed branch: $branch"
+    done
+
     # NOTE: Uses git branch instead of git checkout to avoid changing HEAD while worktrees are active (Greptile review)
     if [[ "$PRD_SOURCE" == "yaml" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
       local integration_branch="ralphy/integration-group-$group"
-      log_info "Creating integration branch for group $group: $integration_branch"
+      log_info "Creating integration branch: $integration_branch"
+      log_info "Will merge ${#group_completed_branches[@]} branches into it"
+      log_structured "integration_start" "group" "$group" "integration_branch" "$integration_branch" "branch_count" "${#group_completed_branches[@]}"
+
+      for branch in "${group_completed_branches[@]}"; do
+        echo "${DIM}  - $branch${RESET}"
+      done
 
       # Create integration branch from current BASE_BRANCH without switching HEAD
       # This avoids state confusion while worktrees are active
+      log_trace "Running: git branch $integration_branch $BASE_BRANCH"
       if git branch "$integration_branch" "$BASE_BRANCH" >/dev/null 2>&1; then
         local merge_failed=false
+        local merged_count=0
         local current_head
         current_head=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
         # Temporarily checkout the integration branch to perform merges
+        log_trace "Running: git checkout $integration_branch"
         if git checkout "$integration_branch" >/dev/null 2>&1; then
           for branch in "${group_completed_branches[@]}"; do
             log_debug "Merging $branch into $integration_branch"
+            log_trace "Running: git merge --no-edit $branch"
             if ! git merge --no-edit "$branch" >/dev/null 2>&1; then
               log_warn "Conflict merging $branch into integration branch"
+              log_structured "merge_conflict" "branch" "$branch" "integration_branch" "$integration_branch"
               # Abort the merge to leave branch in clean state (Greptile review)
               git merge --abort >/dev/null 2>&1 || true
               merge_failed=true
               break
             fi
+            ((merged_count++))
+            log_file_only "DEBUG" "Successfully merged branch $merged_count/${#group_completed_branches[@]}: $branch"
           done
 
           # Return to original HEAD to avoid state confusion
@@ -1820,23 +2035,30 @@ run_parallel_tasks() {
 
           if [[ "$merge_failed" == false ]]; then
             # Update BASE_BRANCH for next group
+            local old_base="$BASE_BRANCH"
             BASE_BRANCH="$integration_branch"
             export BASE_BRANCH
             integration_branches+=("$integration_branch")  # Track for cleanup
-            log_info "Updated BASE_BRANCH to $integration_branch for next group"
+            log_success "Integration successful! BASE_BRANCH updated to: $BASE_BRANCH"
+            log_structured "integration_success" "group" "$group" "old_base" "$old_base" "new_base" "$BASE_BRANCH" "merged_count" "$merged_count"
           else
             # Delete failed integration branch
             git branch -D "$integration_branch" >/dev/null 2>&1 || true
             log_warn "Integration merge failed; next group will branch from original BASE_BRANCH"
+            log_structured "integration_failed" "group" "$group" "reason" "merge_conflict"
           fi
         else
           # Couldn't checkout, clean up the branch
           git branch -D "$integration_branch" >/dev/null 2>&1 || true
-          log_warn "Could not checkout integration branch; next group will branch from original BASE_BRANCH"
+log_warn "Could not checkout integration branch; next group will branch from original BASE_BRANCH"
+          log_structured "integration_failed" "group" "$group" "reason" "checkout_failed"
         fi
       else
         log_warn "Could not create integration branch; next group will branch from original BASE_BRANCH"
+        log_structured "integration_failed" "group" "$group" "reason" "checkout_failed"
       fi
+    else
+      log_debug "Skipping integration: PRD_SOURCE=$PRD_SOURCE, branches=${#group_completed_branches[@]}, groups=${#groups[@]}"
     fi
 
     if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $iteration -ge $MAX_ITERATIONS ]]; then
@@ -2122,14 +2344,17 @@ show_summary() {
 main() {
   parse_args "$@"
 
+  # Initialize logging (after args are parsed)
+  init_log_file
+
   if [[ "$DRY_RUN" == true ]] && [[ "$MAX_ITERATIONS" -eq 0 ]]; then
     MAX_ITERATIONS=1
   fi
-  
+
   # Set up cleanup trap
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
-  
+
   # Check requirements
   check_requirements
   
