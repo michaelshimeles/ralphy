@@ -159,6 +159,13 @@
           },
           "description": "Criteria that must be met for story completion"
         },
+        "completionCriteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Commands to run after task completion to validate (e.g., 'npm test', 'npm run lint'). Task fails if any command returns non-zero exit code."
+        },
         "notes": {
           "type": "string",
           "description": "Additional notes or context"
