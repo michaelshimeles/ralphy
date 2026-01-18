@@ -2,8 +2,8 @@
 # ============================================
 # Ralphy Test Suite
 # ============================================
-# Basic tests for ralphy.sh functionality
-# Run with: ./tests/test_ralphy.sh
+# Basic tests for ralfpretzel.sh functionality
+# Run with: ./tests/test_ralfpretzel.sh
 # ============================================
 
 set -e
@@ -21,7 +21,7 @@ TESTS_FAILED=0
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPHY="$SCRIPT_DIR/../ralphy.sh"
+RALPHY="$SCRIPT_DIR/../ralfpretzel.sh"
 
 # Test helper functions
 pass() {

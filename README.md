@@ -30,13 +30,13 @@ An enhanced autonomous AI coding loop that orchestrates AI assistants (Claude Co
 # Clone RalfPretzel
 git clone https://github.com/czaku/ralfpretzel.git
 cd ralfpretzel
-chmod +x ralphy.sh
+chmod +x ralfpretzel.sh
 
 # Simple: Markdown PRD
-./ralphy.sh --prd PRD.md
+ralfpretzel --prd PRD.md
 
 # Better: JSON PRD with rich context
-./ralphy.sh --json prd.json
+ralfpretzel --json prd.json
 ```
 
 ## Requirements
@@ -66,7 +66,7 @@ See [docs/formats.md](docs/formats.md) for a detailed comparison.
 ### JSON PRD (Recommended for Complex Projects)
 
 ```bash
-./ralphy.sh --json prd.json
+ralfpretzel --json prd.json
 ```
 
 ```json
@@ -100,7 +100,7 @@ See [docs/prd-format.md](docs/prd-format.md) for full schema documentation.
 ### YAML (Simple Task Lists)
 
 ```bash
-./ralphy.sh --yaml tasks.yaml
+ralfpretzel --yaml tasks.yaml
 ```
 
 ```yaml
@@ -118,7 +118,7 @@ See [docs/yaml-format.md](docs/yaml-format.md) for YAML documentation.
 ### Markdown
 
 ```bash
-./ralphy.sh --prd PRD.md
+ralfpretzel --prd PRD.md
 ```
 
 ```markdown
@@ -131,8 +131,8 @@ See [docs/yaml-format.md](docs/yaml-format.md) for YAML documentation.
 ### GitHub Issues
 
 ```bash
-./ralphy.sh --github owner/repo
-./ralphy.sh --github owner/repo --github-label "ready"
+ralfpretzel --github owner/repo
+ralfpretzel --github owner/repo --github-label "ready"
 ```
 
 ## Parallel Execution
@@ -140,21 +140,21 @@ See [docs/yaml-format.md](docs/yaml-format.md) for YAML documentation.
 Run multiple AI agents simultaneously, each in its own isolated git worktree:
 
 ```bash
-./ralphy.sh --parallel                    # 3 agents (default)
-./ralphy.sh --parallel --max-parallel 5   # 5 agents
+ralfpretzel --parallel                    # 3 agents (default)
+ralfpretzel --parallel --max-parallel 5   # 5 agents
 ```
 
 ### How It Works
 
 Each agent gets:
 - Its own git worktree (separate directory)
-- Its own branch (`ralphy/agent-1-task-name`, etc.)
+- Its own branch (`ralfpretzel/agent-1-task-name`, etc.)
 - Complete isolation from other agents
 
 ```
-Agent 1 ─► worktree: /tmp/xxx/agent-1 ─► branch: ralphy/agent-1-create-user-model
-Agent 2 ─► worktree: /tmp/xxx/agent-2 ─► branch: ralphy/agent-2-add-api-endpoints
-Agent 3 ─► worktree: /tmp/xxx/agent-3 ─► branch: ralphy/agent-3-setup-database
+Agent 1 ─► worktree: /tmp/xxx/agent-1 ─► branch: ralfpretzel/agent-1-create-user-model
+Agent 2 ─► worktree: /tmp/xxx/agent-2 ─► branch: ralfpretzel/agent-2-add-api-endpoints
+Agent 3 ─► worktree: /tmp/xxx/agent-3 ─► branch: ralfpretzel/agent-3-setup-database
 ```
 
 ### Parallel Groups (YAML/JSON)
@@ -177,13 +177,13 @@ RalfPretzel includes comprehensive logging:
 
 ```bash
 # Set log level
-./ralphy.sh --log-level debug
+ralfpretzel --log-level debug
 
 # Write to file
-./ralphy.sh --log-file ralphy.log
+ralfpretzel --log-file ralfpretzel.log
 
 # Combined
-./ralphy.sh --log-level trace --log-file debug.log
+ralfpretzel --log-level trace --log-file debug.log
 ```
 
 Log levels: `trace`, `debug`, `info` (default), `warn`, `error`
@@ -191,11 +191,11 @@ Log levels: `trace`, `debug`, `info` (default), `warn`, `error`
 ## AI Engines
 
 ```bash
-./ralphy.sh              # Claude Code (default)
-./ralphy.sh --codex      # Codex CLI
-./ralphy.sh --opencode   # OpenCode
-./ralphy.sh --cursor     # Cursor agent
-./ralphy.sh --qwen       # Qwen-Code
+ralfpretzel              # Claude Code (default)
+ralfpretzel --codex      # Codex CLI
+ralfpretzel --opencode   # OpenCode
+ralfpretzel --cursor     # Cursor agent
+ralfpretzel --qwen       # Qwen-Code
 ```
 
 | Engine | CLI Command | Permissions Flag | Output |
@@ -272,19 +272,19 @@ Log levels: `trace`, `debug`, `info` (default), `warn`, `error`
 
 ```bash
 # JSON PRD with parallel execution
-./ralphy.sh --json prd.json --parallel --max-parallel 4
+ralfpretzel --json prd.json --parallel --max-parallel 4
 
 # YAML tasks with auto-PRs
-./ralphy.sh --yaml tasks.yaml --create-pr
+ralfpretzel --yaml tasks.yaml --create-pr
 
 # GitHub issues with Cursor
-./ralphy.sh --github myorg/myrepo --cursor --parallel
+ralfpretzel --github myorg/myrepo --cursor --parallel
 
 # Feature branch workflow with logging
-./ralphy.sh --branch-per-task --create-pr --base-branch main --log-file session.log
+ralfpretzel --branch-per-task --create-pr --base-branch main --log-file session.log
 
 # Debug mode
-./ralphy.sh --json prd.json --log-level debug --dry-run
+ralfpretzel --json prd.json --log-level debug --dry-run
 ```
 
 ## Documentation
@@ -308,7 +308,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for planned enhancements including:
 
 ```bash
 # Run test suite
-./tests/test_ralphy.sh
+./tests/test_ralfpretzel.sh
 ```
 
 The test suite validates:
@@ -322,7 +322,7 @@ The test suite validates:
 
 1. Fork the repository
 2. Create a feature branch
-3. Run tests: `./tests/test_ralphy.sh`
+3. Run tests: `./tests/test_ralfpretzel.sh`
 4. Submit a pull request
 
 ## Credits
