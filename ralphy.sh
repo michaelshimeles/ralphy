@@ -1578,6 +1578,7 @@ run_parallel_tasks() {
   for group in "${groups[@]}"; do
     local tasks=()
     local group_label=""
+    local group_completed_branches=()  # Track branches completed in this group
 
     if [[ "$PRD_SOURCE" == "yaml" ]]; then
       while IFS= read -r task; do
@@ -1731,6 +1732,7 @@ run_parallel_tasks() {
             total_output_tokens=$((total_output_tokens + out_tok))
             if [[ -n "$branch" ]]; then
               completed_branches+=("$branch")
+              group_completed_branches+=("$branch")  # Also track per-group
               branch_info=" → ${CYAN}$branch${RESET}"
             fi
 
@@ -1781,6 +1783,41 @@ run_parallel_tasks() {
         break
       fi
     done
+
+    # After each parallel_group completes, merge branches into integration branch
+    # so the next group sees the completed work (fixes issue #13)
+    if [[ "$PRD_SOURCE" == "yaml" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
+      local integration_branch="ralphy/integration-group-$group"
+      log_info "Creating integration branch for group $group: $integration_branch"
+
+      # Create integration branch from current BASE_BRANCH
+      if git checkout -b "$integration_branch" "$BASE_BRANCH" >/dev/null 2>&1; then
+        local merge_failed=false
+
+        for branch in "${group_completed_branches[@]}"; do
+          log_debug "Merging $branch into $integration_branch"
+          if ! git merge --no-edit "$branch" >/dev/null 2>&1; then
+            log_warn "Conflict merging $branch into integration branch"
+            merge_failed=true
+            break
+          fi
+        done
+
+        if [[ "$merge_failed" == false ]]; then
+          # Update BASE_BRANCH for next group
+          BASE_BRANCH="$integration_branch"
+          export BASE_BRANCH
+          log_info "Updated BASE_BRANCH to $integration_branch for next group"
+        else
+          # Rollback to original BASE_BRANCH on failure
+          git checkout "$BASE_BRANCH" >/dev/null 2>&1 || true
+          git branch -D "$integration_branch" >/dev/null 2>&1 || true
+          log_warn "Integration merge failed; next group will branch from original BASE_BRANCH"
+        fi
+      else
+        log_warn "Could not create integration branch; next group will branch from original BASE_BRANCH"
+      fi
+    fi
 
     if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $iteration -ge $MAX_ITERATIONS ]]; then
       break
