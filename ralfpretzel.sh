@@ -46,6 +46,16 @@ PRD_FILE="PRD.md"
 GITHUB_REPO=""
 GITHUB_LABEL=""
 
+# Model selection
+MODEL_ID=""                   # Specific model to use (e.g., claude-opus-4-20250514)
+INTERACTIVE_MODE=true         # Interactive wizard by default
+CONFIG_DIR="${HOME}/.ralfpretzel"
+CONFIG_FILE="${CONFIG_DIR}/config"
+
+# Progress tracking
+PROGRESS_DIR=".ralfpretzel/progress"
+PROGRESS_SUMMARY=".ralfpretzel/progress-summary.md"
+
 # Colors (detect if terminal supports colors)
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
   RED=$(tput setaf 1)
@@ -259,23 +269,348 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
+
+# ============================================
+# CONFIG FILE MANAGEMENT
+# ============================================
+
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+    log_trace "Loaded config from $CONFIG_FILE"
+  fi
+}
+
+save_config() {
+  mkdir -p "$CONFIG_DIR"
+  cat > "$CONFIG_FILE" <<EOF
+# RalfPretzel Configuration
+# Auto-generated on $(date)
+
+# Disable interactive wizard if desired
+INTERACTIVE_MODE=${INTERACTIVE_MODE}
+
+# Last used AI engine and model
+AI_ENGINE="${AI_ENGINE}"
+MODEL_ID="${MODEL_ID}"
+
+# Other preferences (add more as needed)
+# LOG_LEVEL="${LOG_LEVEL}"
+EOF
+  log_debug "Saved config to $CONFIG_FILE"
+}
+
+# ============================================
+# INTERACTIVE WIZARD
+# ============================================
+
+interactive_wizard() {
+  log_info "🧙 Welcome to RalfPretzel Interactive Setup"
+  echo ""
+  
+  # Step 1: Select AI Engine
+  if [[ -z "${AI_ENGINE}" ]] || [[ "${AI_ENGINE}" == "claude" ]]; then
+    log_info "Select AI Engine:"
+    echo "  1) Claude Code (recommended)"
+    echo "  2) OpenCode"
+    echo "  3) Codex"
+    echo "  4) Cursor"
+    echo "  5) Qwen-Code"
+    echo ""
+    read -rp "Choice [1]: " engine_choice
+    engine_choice=${engine_choice:-1}
+    
+    case $engine_choice in
+      1) AI_ENGINE="claude" ;;
+      2) AI_ENGINE="opencode" ;;
+      3) AI_ENGINE="codex" ;;
+      4) AI_ENGINE="cursor" ;;
+      5) AI_ENGINE="qwen" ;;
+      *) 
+        log_warn "Invalid choice, using Claude Code"
+        AI_ENGINE="claude" 
+        ;;
+    esac
+    log_success "Selected: ${AI_ENGINE}"
+    echo ""
+  fi
+  
+  # Step 2: Select Model (if not already set)
+  if [[ -z "${MODEL_ID}" ]]; then
+    log_info "Select Model for ${AI_ENGINE}:"
+    
+    case $AI_ENGINE in
+      claude)
+        echo "  1) claude-sonnet-4-20250514 (recommended - balanced)"
+        echo "  2) claude-opus-4-20250514 (most capable, expensive)"
+        echo "  3) claude-sonnet-3.7 (fast, capable)"
+        echo "  4) claude-haiku-3.5 (fastest, cheapest)"
+        echo "  5) Custom model ID"
+        echo ""
+        read -rp "Choice [1]: " model_choice
+        model_choice=${model_choice:-1}
+        
+        case $model_choice in
+          1) MODEL_ID="claude-sonnet-4-20250514" ;;
+          2) MODEL_ID="claude-opus-4-20250514" ;;
+          3) MODEL_ID="claude-sonnet-3.7" ;;
+          4) MODEL_ID="claude-haiku-3.5" ;;
+          5) 
+            read -rp "Enter custom model ID: " MODEL_ID
+            ;;
+          *) MODEL_ID="claude-sonnet-4-20250514" ;;
+        esac
+        ;;
+        
+      opencode)
+        echo "  1) gpt-4o (recommended)"
+        echo "  2) gpt-4-turbo"
+        echo "  3) gpt-3.5-turbo (fastest, cheapest)"
+        echo "  4) o1-preview (advanced reasoning)"
+        echo "  5) Custom model ID"
+        echo ""
+        read -rp "Choice [1]: " model_choice
+        model_choice=${model_choice:-1}
+        
+        case $model_choice in
+          1) MODEL_ID="gpt-4o" ;;
+          2) MODEL_ID="gpt-4-turbo" ;;
+          3) MODEL_ID="gpt-3.5-turbo" ;;
+          4) MODEL_ID="o1-preview" ;;
+          5) 
+            read -rp "Enter custom model ID: " MODEL_ID
+            ;;
+          *) MODEL_ID="gpt-4o" ;;
+        esac
+        ;;
+        
+      codex)
+        echo "  1) deepseek-v3 (recommended)"
+        echo "  2) claude-sonnet-4"
+        echo "  3) Custom model ID"
+        echo ""
+        read -rp "Choice [1]: " model_choice
+        model_choice=${model_choice:-1}
+        
+        case $model_choice in
+          1) MODEL_ID="deepseek-v3" ;;
+          2) MODEL_ID="claude-sonnet-4" ;;
+          3) 
+            read -rp "Enter custom model ID: " MODEL_ID
+            ;;
+          *) MODEL_ID="deepseek-v3" ;;
+        esac
+        ;;
+        
+      cursor)
+        log_info "Cursor uses its own model settings"
+        MODEL_ID="cursor-default"
+        ;;
+        
+      qwen)
+        echo "  1) qwen-2.5-coder-32b (recommended)"
+        echo "  2) qwen-2.5-coder-72b (most capable)"
+        echo "  3) Custom model ID"
+        echo ""
+        read -rp "Choice [1]: " model_choice
+        model_choice=${model_choice:-1}
+        
+        case $model_choice in
+          1) MODEL_ID="qwen-2.5-coder-32b" ;;
+          2) MODEL_ID="qwen-2.5-coder-72b" ;;
+          3) 
+            read -rp "Enter custom model ID: " MODEL_ID
+            ;;
+          *) MODEL_ID="qwen-2.5-coder-32b" ;;
+        esac
+        ;;
+    esac
+    
+    log_success "Selected model: ${MODEL_ID}"
+    echo ""
+  fi
+  
+  # Step 3: Ask about PRD source if not set
+  if [[ -z "${PRD_FILE}" ]] && [[ "${PRD_SOURCE}" == "markdown" ]]; then
+    log_info "Select task source:"
+    echo "  1) Markdown PRD (PRD.md)"
+    echo "  2) JSON PRD"
+    echo "  3) YAML tasks"
+    echo "  4) GitHub Issues"
+    echo ""
+    read -rp "Choice [1]: " source_choice
+    source_choice=${source_choice:-1}
+    
+    case $source_choice in
+      1) 
+        PRD_FILE="PRD.md"
+        PRD_SOURCE="markdown"
+        ;;
+      2)
+        read -rp "Enter JSON PRD path [prd.json]: " prd_path
+        PRD_FILE="${prd_path:-prd.json}"
+        PRD_SOURCE="json"
+        ;;
+      3)
+        read -rp "Enter YAML file path [tasks.yaml]: " yaml_path
+        PRD_FILE="${yaml_path:-tasks.yaml}"
+        PRD_SOURCE="yaml"
+        ;;
+      4)
+        read -rp "Enter GitHub repo (owner/repo): " GITHUB_REPO
+        PRD_SOURCE="github"
+        ;;
+      *)
+        PRD_FILE="PRD.md"
+        PRD_SOURCE="markdown"
+        ;;
+    esac
+    log_success "Using: ${PRD_SOURCE} source"
+    echo ""
+  fi
+  
+  # Step 4: Save preferences
+  read -rp "Save these settings as default? [Y/n]: " save_choice
+  save_choice=${save_choice:-Y}
+  if [[ "${save_choice}" =~ ^[Yy] ]]; then
+    save_config
+    log_success "Preferences saved to ${CONFIG_FILE}"
+  else
+    log_info "Preferences not saved (session only)"
+  fi
+  
+  echo ""
+  log_section "Starting RalfPretzel"
+}
+
+
+# ============================================
+# PROGRESS TRACKING
+# ============================================
+
+init_progress_tracking() {
+  mkdir -p "$PROGRESS_DIR"
+  log_debug "Initialized progress tracking in $PROGRESS_DIR"
+}
+
+log_progress() {
+  local group=$1
+  local task_id=$2
+  local task_title=$3
+  local status=$4
+  local content=$5
+  
+  local progress_file="${PROGRESS_DIR}/group-${group}.md"
+  
+  # Create or append to group progress file
+  if [[ ! -f "$progress_file" ]]; then
+    cat > "$progress_file" <<EOF
+# Progress Log - Group ${group}
+
+Generated by RalfPretzel on $(date)
+
+---
+
+EOF
+  fi
+  
+  # Append task progress
+  cat >> "$progress_file" <<EOF
+## Task: ${task_id} - ${task_title}
+**Timestamp**: $(date '+%Y-%m-%d %H:%M:%S')
+**Status**: ${status}
+
+${content}
+
+---
+
+EOF
+  
+  log_trace "Logged progress for ${task_id} to ${progress_file}"
+}
+
+consolidate_progress() {
+  log_info "Consolidating progress logs..."
+  
+  # Create consolidated summary
+  {
+    echo "# RalfPretzel Progress Summary"
+    echo ""
+    echo "Generated: $(date)"
+    echo ""
+    echo "---"
+    echo ""
+    
+    # Include all group progress files
+    for group_file in "${PROGRESS_DIR}"/group-*.md; do
+      if [[ -f "$group_file" ]]; then
+        echo ""
+        cat "$group_file"
+        echo ""
+      fi
+    done
+    
+    echo "---"
+    echo ""
+    echo "## Notes"
+    echo ""
+    echo "- Individual group progress files available in: ${PROGRESS_DIR}/"
+    echo "- If this consolidated file causes merge conflicts, it can be safely deleted"
+    echo "- The per-group files (group-1.md, group-2.md, etc.) contain all progress data"
+  } > "$PROGRESS_SUMMARY"
+  
+  log_success "Progress summary created: ${PROGRESS_SUMMARY}"
+}
+
 # ============================================
 # HELP & VERSION
 # ============================================
 
 show_help() {
   cat << EOF
-${BOLD}Ralphy${RESET} - Autonomous AI Coding Loop (v${VERSION})
+${BOLD}RalfPretzel${RESET} - Autonomous AI Coding Loop (v${VERSION})
 
 ${BOLD}USAGE:${RESET}
-  ./ralfpretzel.sh [options]
+  ralfpretzel [options]
+  ralfpretzel                    # Interactive wizard (default)
+  ralfpretzel --no-interactive   # Skip wizard, use defaults/config
 
-${BOLD}AI ENGINE OPTIONS:${RESET}
+${BOLD}INTERACTIVE MODE:${RESET}
+  -i, --interactive      Launch interactive setup wizard (default)
+  -n, --no-interactive   Skip wizard, use command-line flags or saved config
+
+${BOLD}AI ENGINE & MODEL:${RESET}
   --claude            Use Claude Code (default)
-  --opencode          Use OpenCode
+  --opencode          Use OpenCode  
   --cursor            Use Cursor agent
   --codex             Use Codex CLI
   --qwen              Use Qwen-Code
+  --model MODEL_ID    Specify model (e.g., claude-opus-4-20250514)
+
+${BOLD}COMMON MODELS BY ENGINE:${RESET}
+  Claude Code:
+    claude-opus-4-20250514      Most capable, expensive
+    claude-sonnet-4-20250514    Recommended balance
+    claude-sonnet-3.7           Fast and capable
+    claude-haiku-3.5            Fastest, cheapest
+
+  OpenCode:
+    gpt-4o                      Recommended
+    gpt-4-turbo                 Fast GPT-4
+    gpt-3.5-turbo               Fastest, cheapest
+    o1-preview                  Advanced reasoning
+
+  Codex:
+    deepseek-v3                 Recommended
+    claude-sonnet-4             Via Codex CLI
+
+  Cursor:
+    (uses Cursor's model settings)
+
+  Qwen:
+    qwen-2.5-coder-32b          Recommended
+    qwen-2.5-coder-72b          Most capable
 
 ${BOLD}WORKFLOW OPTIONS:${RESET}
   --no-tests          Skip writing and running tests
@@ -317,15 +652,24 @@ ${BOLD}OTHER OPTIONS:${RESET}
   --version           Show version number
 
 ${BOLD}EXAMPLES:${RESET}
-  ./ralfpretzel.sh                              # Run with Claude Code
-  ./ralfpretzel.sh --codex                      # Run with Codex CLI
-  ./ralfpretzel.sh --opencode                   # Run with OpenCode
-  ./ralfpretzel.sh --cursor                     # Run with Cursor agent
-  ./ralfpretzel.sh --branch-per-task --create-pr  # Feature branch workflow
-  ./ralfpretzel.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
-  ./ralfpretzel.sh --yaml tasks.yaml            # Use YAML task file
-  ./ralfpretzel.sh --json prd.json              # Use JSON PRD file
-  ./ralfpretzel.sh --github owner/repo          # Fetch from GitHub issues
+  # Interactive wizard (recommended for new users)
+  ralfpretzel
+
+  # Explicit mode with specific model
+  ralfpretzel --claude --model claude-opus-4-20250514 --json prd.json
+
+  # Skip wizard, use saved config
+  ralfpretzel --no-interactive --json prd.json
+
+  # Different AI engines
+  ralfpretzel --opencode --model gpt-4o --parallel
+  ralfpretzel --codex --model deepseek-v3 --yaml tasks.yaml
+
+  # Feature branch workflow
+  ralfpretzel --branch-per-task --create-pr --base-branch main
+
+  # Parallel execution
+  ralfpretzel --parallel --max-parallel 4 --json prd.json
 
 ${BOLD}PRD FORMATS:${RESET}
   Markdown (PRD.md):
@@ -340,6 +684,12 @@ ${BOLD}PRD FORMATS:${RESET}
   JSON (prd.json) - Extended JSON format:
     {
       "branchName": "feature/name",
+      "referenceDocuments": {
+        "API Spec": "./docs/api.md"  # Loaded into AI prompts
+      },
+      "rules": {
+        "Code Style": "./docs/style.md"  # Loaded into AI prompts
+      },
       "userStories": [
         {
           "id": "US-001",
@@ -355,6 +705,17 @@ ${BOLD}PRD FORMATS:${RESET}
 
   GitHub Issues:
     Uses open issues from the specified repository
+
+${BOLD}CONFIGURATION:${RESET}
+  Config file: ~/.ralfpretzel/config
+  
+  The interactive wizard can save your preferences. To disable the wizard
+  by default, add this to your config:
+    INTERACTIVE_MODE=false
+
+  Progress tracking: .ralfpretzel/progress/
+    - Per-group progress files during execution
+    - Consolidated progress-summary.md at completion
 
 EOF
 }
@@ -406,6 +767,22 @@ parse_args() {
         ;;
       --qwen)
         AI_ENGINE="qwen"
+        shift
+        ;;
+      --model)
+        MODEL_ID="${2:-}"
+        if [[ -z "$MODEL_ID" ]]; then
+          log_error "--model requires a model ID"
+          exit 1
+        fi
+        shift 2
+        ;;
+      --no-interactive|-n)
+        INTERACTIVE_MODE=false
+        shift
+        ;;
+      --interactive|-i)
+        INTERACTIVE_MODE=true
         shift
         ;;
       --dry-run)
@@ -1241,36 +1618,47 @@ run_ai_command() {
   case "$AI_ENGINE" in
     opencode)
       # OpenCode: use 'run' command with JSON format and permissive settings
-      OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
-        --format json \
-        "$prompt" > "$output_file" 2>&1 &
+      local opencode_cmd="OPENCODE_PERMISSION='{\"*\":\"allow\"}' opencode run --format json"
+      if [[ -n "$MODEL_ID" ]]; then
+        opencode_cmd="$opencode_cmd --model \"$MODEL_ID\""
+      fi
+      opencode_cmd="$opencode_cmd \"$prompt\" > \"$output_file\" 2>&1 &"
+      eval "$opencode_cmd"
       ;;
     cursor)
       # Cursor agent: use --print for non-interactive, --force to allow all commands
+      # Note: Cursor uses its own model settings, --model not typically supported
       agent --print --force \
         --output-format stream-json \
         "$prompt" > "$output_file" 2>&1 &
       ;;
     qwen)
       # Qwen-Code: use CLI with JSON format and auto-approve tools
-      qwen --output-format stream-json \
-        --approval-mode yolo \
-        -p "$prompt" > "$output_file" 2>&1 &
+      local qwen_cmd="qwen --output-format stream-json --approval-mode yolo"
+      if [[ -n "$MODEL_ID" ]]; then
+        qwen_cmd="$qwen_cmd --model \"$MODEL_ID\""
+      fi
+      qwen_cmd="$qwen_cmd -p \"$prompt\" > \"$output_file\" 2>&1 &"
+      eval "$qwen_cmd"
       ;;
     codex)
       CODEX_LAST_MESSAGE_FILE="${output_file}.last"
       rm -f "$CODEX_LAST_MESSAGE_FILE"
-      codex exec --full-auto \
-        --json \
-        --output-last-message "$CODEX_LAST_MESSAGE_FILE" \
-        "$prompt" > "$output_file" 2>&1 &
+      local codex_cmd="codex exec --full-auto --json --output-last-message \"$CODEX_LAST_MESSAGE_FILE\""
+      if [[ -n "$MODEL_ID" ]]; then
+        codex_cmd="$codex_cmd --model \"$MODEL_ID\""
+      fi
+      codex_cmd="$codex_cmd \"$prompt\" > \"$output_file\" 2>&1 &"
+      eval "$codex_cmd"
       ;;
     *)
-      # Claude Code: use existing approach
-      claude --dangerously-skip-permissions \
-        --verbose \
-        --output-format stream-json \
-        -p "$prompt" > "$output_file" 2>&1 &
+      # Claude Code: use existing approach with optional model
+      local claude_cmd="claude --dangerously-skip-permissions --verbose --output-format stream-json"
+      if [[ -n "$MODEL_ID" ]]; then
+        claude_cmd="$claude_cmd --model \"$MODEL_ID\""
+      fi
+      claude_cmd="$claude_cmd -p \"$prompt\" > \"$output_file\" 2>&1 &"
+      eval "$claude_cmd"
       ;;
   esac
   
@@ -2497,10 +2885,31 @@ show_summary() {
 # ============================================
 
 main() {
+  # Load config file first (if exists)
+  load_config
+  
+  # Parse command-line arguments (override config)
   parse_args "$@"
 
   # Initialize logging (after args are parsed)
   init_log_file
+  
+  # Run interactive wizard if enabled and no explicit flags were given
+  # Check if user provided engine or source flags explicitly
+  local has_explicit_flags=false
+  for arg in "$@"; do
+    case $arg in
+      --claude|--opencode|--codex|--cursor|--qwen|--prd|--yaml|--json|--github|--model)
+        has_explicit_flags=true
+        break
+        ;;
+    esac
+  done
+  
+  # Run wizard if interactive mode and no explicit flags
+  if [[ "$INTERACTIVE_MODE" == true ]] && [[ "$has_explicit_flags" == false ]]; then
+    interactive_wizard
+  fi
 
   if [[ "$DRY_RUN" == true ]] && [[ "$MAX_ITERATIONS" -eq 0 ]]; then
     MAX_ITERATIONS=1
@@ -2513,9 +2922,12 @@ main() {
   # Check requirements
   check_requirements
   
+  # Initialize progress tracking
+  init_progress_tracking
+  
   # Show banner
   echo "${BOLD}============================================${RESET}"
-  echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
+  echo "${BOLD}RalfPretzel${RESET} - Running until PRD is complete"
   local engine_display
   case "$AI_ENGINE" in
     opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
@@ -2525,6 +2937,9 @@ main() {
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
+  if [[ -n "$MODEL_ID" ]]; then
+    echo "Model: ${CYAN}${MODEL_ID}${RESET}"
+  fi
   echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   
   local mode_parts=()
@@ -2544,6 +2959,7 @@ main() {
   # Run in parallel or sequential mode
   if [[ "$PARALLEL" == true ]]; then
     run_parallel_tasks
+    consolidate_progress  # Consolidate progress logs at the end
     show_summary
     notify_done
     exit 0
@@ -2565,6 +2981,7 @@ main() {
         ;;
       2)
         # All tasks complete
+        consolidate_progress  # Consolidate progress logs at the end
         show_summary
         notify_done
         exit 0
@@ -2574,8 +2991,9 @@ main() {
     # Check max iterations
     if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $iteration -ge $MAX_ITERATIONS ]]; then
       log_warn "Reached max iterations ($MAX_ITERATIONS)"
+      consolidate_progress  # Consolidate progress logs at the end
       show_summary
-      notify_done "Ralphy stopped after $MAX_ITERATIONS iterations"
+      notify_done "RalfPretzel stopped after $MAX_ITERATIONS iterations"
       exit 0
     fi
     
