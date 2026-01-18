@@ -2,12 +2,11 @@
 
 # ============================================
 # Ralphy - Autonomous AI Coding Loop
-# Supports Claude Code, OpenCode, Codex, and Cursor
+# Supports Claude Code, OpenCode, Codex, Cursor, and Qwen-Code
 # Runs until PRD is complete
 # ============================================
 
 set -euo pipefail
-
 
 # ============================================
 # CONFIGURATION & DEFAULTS
@@ -523,12 +522,16 @@ check_requirements() {
     markdown)
       if [[ ! -f "$PRD_FILE" ]]; then
         log_error "$PRD_FILE not found in current directory"
+        log_info "Create a PRD.md file with tasks marked as '- [ ] Task description'"
+        log_info "Or use: --yaml tasks.yaml for YAML task files"
         exit 1
       fi
       ;;
     yaml)
       if [[ ! -f "$PRD_FILE" ]]; then
         log_error "$PRD_FILE not found in current directory"
+        log_info "Create a tasks.yaml file with tasks in YAML format"
+        log_info "Or use: --prd PRD.md for Markdown task files"
         exit 1
       fi
       if ! command -v yq &>/dev/null; then
@@ -562,39 +565,46 @@ check_requirements() {
   case "$AI_ENGINE" in
     opencode)
       if ! command -v opencode &>/dev/null; then
-        log_error "OpenCode CLI not found. Install from https://opencode.ai/docs/"
+        log_error "OpenCode CLI not found."
+        log_info "Install from: https://opencode.ai/docs/"
         exit 1
       fi
       ;;
     codex)
       if ! command -v codex &>/dev/null; then
-        log_error "Codex CLI not found. Make sure 'codex' is in your PATH."
+        log_error "Codex CLI not found."
+        log_info "Make sure 'codex' is in your PATH."
         exit 1
       fi
       ;;
     cursor)
       if ! command -v agent &>/dev/null; then
-        log_error "Cursor agent CLI not found. Make sure Cursor is installed and 'agent' is in your PATH."
+        log_error "Cursor agent CLI not found."
+        log_info "Make sure Cursor is installed and 'agent' is in your PATH."
         exit 1
       fi
       ;;
     qwen)
       if ! command -v qwen &>/dev/null; then
-        log_error "Qwen-Code CLI not found. Make sure 'qwen' is in your PATH."
+        log_error "Qwen-Code CLI not found."
+        log_info "Make sure 'qwen' is in your PATH."
         exit 1
       fi
       ;;
     *)
       if ! command -v claude &>/dev/null; then
-        log_error "Claude Code CLI not found. Install from https://github.com/anthropics/claude-code"
+        log_error "Claude Code CLI not found."
+        log_info "Install from: https://github.com/anthropics/claude-code"
+        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen"
         exit 1
       fi
       ;;
   esac
 
-  # Check for jq
+  # Check for jq (required for JSON parsing)
   if ! command -v jq &>/dev/null; then
-    missing+=("jq")
+    log_error "jq is required but not installed. On Linux, install with: apt-get install jq (Debian/Ubuntu) or yum install jq (RHEL/CentOS)"
+    exit 1
   fi
 
   # Check for gh if PR creation is requested
@@ -605,7 +615,19 @@ check_requirements() {
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     log_warn "Missing optional dependencies: ${missing[*]}"
-    log_warn "Token tracking may not work properly"
+    log_warn "Some features may not work properly"
+  fi
+
+  # Check for git
+  if ! command -v git &>/dev/null; then
+    log_error "git is required but not installed. Install git before running Ralphy."
+    exit 1
+  fi
+
+  # Check if we're in a git repository
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    log_error "Not a git repository. Ralphy requires a git repository to track changes."
+    exit 1
   fi
 
   # Create progress.txt if missing
