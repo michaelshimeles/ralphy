@@ -46,6 +46,10 @@ PARALLEL=false
 MAX_PARALLEL=3
 ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
 
+# Multi-engine support
+declare -a ENGINES=()
+declare -A ENGINE_WEIGHTS=()
+
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
 PRD_FILE="PRD.md"
@@ -710,6 +714,41 @@ parse_args() {
       --droid)
         AI_ENGINE="droid"
         shift
+        ;;
+      --engines)
+        [[ -z "${2:-}" ]] && { log_error "--engines requires an argument"; exit 1; }
+        local engines_arg="$2"
+
+        # Split comma-separated list into ENGINES array
+        IFS=',' read -ra ENGINES <<< "$engines_arg"
+
+        # Parse each engine for weight syntax (engine:weight)
+        for i in "${!ENGINES[@]}"; do
+          local engine_spec="${ENGINES[$i]}"
+
+          if [[ "$engine_spec" =~ ^([a-zA-Z0-9_-]+):([0-9]+)$ ]]; then
+            local engine="${BASH_REMATCH[1]}"
+            local weight="${BASH_REMATCH[2]}"
+
+            # Validate weight is a positive integer
+            if [[ "$weight" -le 0 ]]; then
+              log_error "Engine weight must be a positive integer: $engine_spec"
+              exit 1
+            fi
+
+            # Store engine and weight
+            ENGINES[$i]="$engine"
+            ENGINE_WEIGHTS["$engine"]="$weight"
+          elif [[ "$engine_spec" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            # Engine without weight, default weight is 1
+            ENGINE_WEIGHTS["$engine_spec"]=1
+          else
+            log_error "Invalid engine specification: $engine_spec"
+            exit 1
+          fi
+        done
+
+        shift 2
         ;;
       --dry-run)
         DRY_RUN=true
