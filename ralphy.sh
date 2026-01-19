@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration
+declare -a ENGINES=()  # Array of engine names to use for parallel execution
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Associative array: engine name -> weight
+declare -A ENGINE_AGENT_COUNT=()  # Associative array: engine name -> agent count
+declare -A ENGINE_COSTS=()  # Associative array: engine name -> total cost
+declare -A ENGINE_SUCCESS=()  # Associative array: engine name -> success count
+declare -A ENGINE_FAILURES=()  # Associative array: engine name -> failure count
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -114,6 +124,64 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Load parallel execution configuration from .ralphy/config.yaml
+load_parallel_config() {
+  # Only load if config file exists
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    log_debug "Config file $CONFIG_FILE not found, skipping parallel config load"
+    return 0
+  fi
+
+  # Check if yq is available
+  if ! command -v yq &>/dev/null; then
+    log_debug "yq not found, skipping parallel config load"
+    return 0
+  fi
+
+  log_debug "Loading parallel configuration from $CONFIG_FILE"
+
+  # Read parallel.distribution if present
+  local distribution
+  distribution=$(yq eval '.parallel.distribution // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+  if [[ -n "$distribution" ]]; then
+    ENGINE_DISTRIBUTION="$distribution"
+    log_debug "Loaded distribution strategy: $ENGINE_DISTRIBUTION"
+  fi
+
+  # Read parallel.max_concurrent if present
+  local max_concurrent
+  max_concurrent=$(yq eval '.parallel.max_concurrent // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+  if [[ -n "$max_concurrent" && "$max_concurrent" != "null" ]]; then
+    MAX_PARALLEL="$max_concurrent"
+    log_debug "Loaded max_concurrent: $MAX_PARALLEL"
+  fi
+
+  # Read parallel.engines array if present
+  local engines_count
+  engines_count=$(yq eval '.parallel.engines | length' "$CONFIG_FILE" 2>/dev/null || echo "0")
+
+  if [[ "$engines_count" -gt 0 ]]; then
+    log_debug "Found $engines_count engines in config"
+
+    # Parse each engine entry
+    for ((i=0; i<engines_count; i++)); do
+      local engine_name
+      local engine_weight
+
+      engine_name=$(yq eval ".parallel.engines[$i].name // \"\"" "$CONFIG_FILE" 2>/dev/null || echo "")
+      engine_weight=$(yq eval ".parallel.engines[$i].weight // 1" "$CONFIG_FILE" 2>/dev/null || echo "1")
+
+      if [[ -n "$engine_name" && "$engine_name" != "null" ]]; then
+        ENGINES+=("$engine_name")
+        ENGINE_WEIGHTS["$engine_name"]="$engine_weight"
+        log_debug "Loaded engine: $engine_name (weight: $engine_weight)"
+      fi
+    done
+  fi
+
+  return 0
 }
 
 # ============================================
@@ -2754,6 +2822,11 @@ show_summary() {
 
 main() {
   parse_args "$@"
+
+  # Load parallel configuration from config file if ENGINES not set via CLI
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    load_parallel_config
+  fi
 
   # Handle --init mode
   if [[ "$INIT_MODE" == true ]]; then
