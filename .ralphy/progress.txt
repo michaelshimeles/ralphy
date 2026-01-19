@@ -1,0 +1,51 @@
+Task 7: Display parsed engines in dry-run output showing distribution strategy and engine list with weights
+
+## Implementation Summary
+
+Implemented dry-run display functionality for multi-engine support in ralphy.sh:
+
+### Changes Made:
+
+1. **Created display_engines_config() function** (lines 120-178)
+   - Displays engine configuration with weights
+   - Shows distribution strategy (round-robin, weighted, random, fill-first)
+   - Provides strategy explanation for each mode
+   - Maintains backward compatibility with single AI_ENGINE
+
+2. **Updated main banner section** (line 2959)
+   - Replaced inline engine display with call to display_engines_config()
+   - Improved formatting consistency (aligned "Source:" and "Config:" labels)
+
+3. **Added dry-run handling in run_parallel_tasks()** (lines 2227-2290)
+   - Displays "DRY RUN - Parallel Execution Plan" header
+   - Shows engine distribution configuration for multi-engine setups
+   - Includes task assignment preview (first 10 tasks) with simulated engine assignments
+   - Simulates engine assignment based on distribution strategy:
+     * round-robin: cycles through engines
+     * fill-first: fills engines sequentially
+     * random/weighted: uses first engine (simplified for preview)
+   - Lists all tasks to be executed
+   - Returns without executing any tasks
+
+### Features Implemented:
+
+- **Multi-engine display**: Shows comma-separated list of engines with weights (e.g., "claude:3, opencode:1")
+- **Strategy explanations**: Clear descriptions of each distribution strategy
+- **Assignment preview**: Shows how agents 1-10 would be assigned to engines
+- **Backward compatibility**: Falls back to single engine display when ENGINES array not set
+- **Consistent formatting**: Maintains ralphy's existing color scheme and layout
+
+### Testing:
+
+- Created test_dry_run_display.sh for manual verification
+- Verified bash syntax with `bash -n ralphy.sh`
+- Tested that ralphy.sh runs successfully with --help flag
+
+### Dependencies:
+
+This implementation assumes the following variables exist (from tasks 1-6):
+- ENGINES array
+- ENGINE_DISTRIBUTION string
+- ENGINE_WEIGHTS associative array
+
+The code gracefully degrades when these variables are not set, maintaining backward compatibility with single-engine mode.

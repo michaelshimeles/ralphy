@@ -116,6 +116,62 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
+# Display engine configuration (for multi-engine support)
+display_engines_config() {
+  # Check if ENGINES array is defined and has elements
+  if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 0 ]]; then
+    local engine_list=""
+    local weighted_display=""
+
+    # Build engine list with weights if available
+    for engine in "${ENGINES[@]}"; do
+      if [[ -n "${ENGINE_WEIGHTS[$engine]:-}" ]] && [[ "${ENGINE_WEIGHTS[$engine]}" != "1" ]]; then
+        if [[ -n "$engine_list" ]]; then
+          engine_list+=", "
+        fi
+        engine_list+="$engine:${ENGINE_WEIGHTS[$engine]}"
+      else
+        if [[ -n "$engine_list" ]]; then
+          engine_list+=", "
+        fi
+        engine_list+="$engine"
+      fi
+    done
+
+    # Display distribution strategy
+    local strategy_display="${ENGINE_DISTRIBUTION:-round-robin}"
+    echo "Engines:        ${CYAN}$strategy_display${RESET} [$engine_list]"
+
+    # Add distribution explanation
+    case "$strategy_display" in
+      round-robin)
+        echo "${DIM}Distribution:   Cycle through engines in order${RESET}"
+        ;;
+      weighted)
+        echo "${DIM}Distribution:   Distribute based on engine weights${RESET}"
+        ;;
+      random)
+        echo "${DIM}Distribution:   Random selection from engine list${RESET}"
+        ;;
+      fill-first)
+        echo "${DIM}Distribution:   Fill each engine before moving to next${RESET}"
+        ;;
+    esac
+  elif [[ -n "$AI_ENGINE" ]]; then
+    # Fall back to single engine display (backward compatibility)
+    local engine_display
+    case "$AI_ENGINE" in
+      opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
+      cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
+      codex) engine_display="${BLUE}Codex${RESET}" ;;
+      qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
+      droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
+      *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
+    esac
+    echo "Engine:         $engine_display"
+  fi
+}
+
 # ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
@@ -2151,21 +2207,89 @@ Focus only on implementing: $task_name"
 
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-  
+
   local all_tasks=()
-  
+
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")
   done < <(get_all_tasks)
-  
+
   if [[ ${#all_tasks[@]} -eq 0 ]]; then
     log_info "No tasks to run"
     return 2
   fi
-  
+
   local total_tasks=${#all_tasks[@]}
   log_info "Found $total_tasks tasks to process"
+
+  # Handle dry-run mode - show what would be executed
+  if [[ "$DRY_RUN" == true ]]; then
+    echo ""
+    log_info "${BOLD}DRY RUN - Parallel Execution Plan${RESET}"
+    echo ""
+
+    # Display engine configuration if multi-engine is configured
+    if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 1 ]]; then
+      echo "${BOLD}Engine Distribution:${RESET}"
+      display_engines_config
+      echo ""
+
+      # Show task assignment preview (first 10 tasks)
+      echo "${BOLD}Task Assignment Preview (first 10):${RESET}"
+      local preview_count=$((total_tasks < 10 ? total_tasks : 10))
+      for ((i = 0; i < preview_count; i++)); do
+        local task="${all_tasks[$i]}"
+        local agent_num=$((i + 1))
+
+        # Simulate engine assignment based on distribution strategy
+        local assigned_engine=""
+        if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 0 ]]; then
+          local engine_count=${#ENGINES[@]}
+          case "${ENGINE_DISTRIBUTION:-round-robin}" in
+            round-robin)
+              local engine_idx=$((agent_num % engine_count))
+              assigned_engine="${ENGINES[$engine_idx]}"
+              ;;
+            fill-first)
+              local agents_per_engine=$(( (total_tasks + engine_count - 1) / engine_count ))
+              local engine_idx=$(( (agent_num - 1) / agents_per_engine ))
+              [[ $engine_idx -ge $engine_count ]] && engine_idx=$((engine_count - 1))
+              assigned_engine="${ENGINES[$engine_idx]}"
+              ;;
+            random)
+              assigned_engine="${ENGINES[0]}"  # Can't truly simulate random in dry-run
+              ;;
+            weighted)
+              assigned_engine="${ENGINES[0]}"  # Simplified for dry-run preview
+              ;;
+            *)
+              assigned_engine="${ENGINES[0]}"
+              ;;
+          esac
+        else
+          assigned_engine="${AI_ENGINE:-claude}"
+        fi
+
+        echo "${DIM}  Agent $agent_num → ${CYAN}$assigned_engine${RESET}: $task${RESET}"
+      done
+
+      if [[ $total_tasks -gt 10 ]]; then
+        echo "${DIM}  ... and $((total_tasks - 10)) more tasks${RESET}"
+      fi
+      echo ""
+    fi
+
+    echo "${BOLD}Tasks to execute:${RESET}"
+    for ((i = 0; i < total_tasks; i++)); do
+      local task="${all_tasks[$i]}"
+      echo "${DIM}  $((i + 1)). $task${RESET}"
+    done
+    echo ""
+
+    log_info "Dry-run complete - no tasks were executed"
+    return 0
+  fi
   
   # Store original directory for git operations from subshells
   ORIGINAL_DIR=$(pwd)
@@ -2832,19 +2956,10 @@ main() {
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
-  local engine_display
-  case "$AI_ENGINE" in
-    opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-    cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-    codex) engine_display="${BLUE}Codex${RESET}" ;;
-    qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-    *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
-  esac
-  echo "Engine: $engine_display"
-  echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
+  display_engines_config
+  echo "Source:         ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   if [[ -d "$RALPHY_DIR" ]]; then
-    echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
+    echo "Config:         ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
   fi
 
   local mode_parts=()
