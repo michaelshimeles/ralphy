@@ -1,72 +1,39 @@
-## Completed Tasks
+Task: Verify backward compatibility: single engine flag works, no engine uses default, single task mode works, existing config without parallel.engines works
 
-### Add --engine-distribution CLI argument with validation
-- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
+Completed: 2026-01-19
 
-### Implement --engines CLI argument parsing in parse_args()
+Summary:
+Created comprehensive backward compatibility test suite (test_backward_compatibility.sh) to verify all existing functionality continues to work correctly.
 
-**Location:** ralphy.sh:712-748
+Tests verified:
+1. Single engine flag functionality (--claude, --opencode, --cursor, --codex, --qwen, --droid)
+   - All flags correctly parse and set AI_ENGINE variable
+   - All flags are present in the script and documented in help text
 
-**What was implemented:**
-1. Added `ENGINES` array and `ENGINE_WEIGHTS` associative array variable declarations (lines 48-49)
-2. Implemented `--engines` argument parsing in parse_args() function (lines 712-748)
+2. Default engine behavior
+   - Confirmed default is "claude" when no engine flag is specified
+   - Default is set at initialization (line 30 in ralphy.sh)
 
-**Features:**
-- Parses comma-separated list of engines into ENGINES array
-- Supports weight syntax: `engine:weight` (e.g., `claude:5`)
-- Validates that weights are positive integers (rejects zero and negative values)
-- Supports engine names without weights (defaults to weight of 1)
-- Allows alphanumeric engine names with hyphens and underscores
-- Provides clear error messages for invalid specifications
+3. --sonnet flag for Claude Sonnet model
+   - Verified --sonnet flag sets CLAUDE_MODEL="sonnet"
+   - Confirmed conditional --model flag is passed to claude CLI
 
-**Examples:**
-- `--engines claude` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=1
-- `--engines claude:5` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=5
-- `--engines claude:3,opencode,cursor:2` → ENGINES=(claude opencode cursor), ENGINE_WEIGHTS[claude]=3, ENGINE_WEIGHTS[opencode]=1, ENGINE_WEIGHTS[cursor]=2
+4. Single task mode (brownfield)
+   - SINGLE_TASK variable properly initialized
+   - run_brownfield_task() function exists and handles all engines
+   - Each engine has proper case statement handling
 
-**Validation:**
-- Engine names must match pattern: `^[a-zA-Z0-9_-]+$`
-- Weight syntax must match pattern: `^([a-zA-Z0-9_-]+):([0-9]+)$`
-- Weights must be positive integers (> 0)
-- Invalid formats are rejected with error messages
+5. Existing config without parallel.engines
+   - Created test config file without new parallel.engines field
+   - Verified config can be read successfully with yq
+   - Confirmed parallel.engines field is absent (backward compatible)
 
-**Testing:**
-Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
-- Valid engine names (with/without hyphens/underscores)
-- Engine with weight syntax parsing
-- Comma-separated list splitting
-- Zero and negative weight rejection
-- Invalid format rejection
-- Special character rejection
+6. Parallel mode compatibility
+   - AI_ENGINE is exported for parallel agent execution
+   - PARALLEL flag parsing works correctly
+   - MAX_PARALLEL defaults to 3
 
-All tests passed successfully.
+All 14 test categories passed with 31 individual assertions.
 
-### Update --help output with --engines and --engine-distribution flags
-
-**Location:** ralphy.sh:619-629 (multi-engine options), ralphy.sh:662-668 (examples)
-
-**What was implemented:**
-1. Added new "MULTI-ENGINE OPTIONS" section to help output (lines 619-629)
-2. Added multi-engine examples to the EXAMPLES section (lines 662-668)
-
-**Documentation Added:**
-- `--engines LIST`: Comma-separated list of engines with optional weight syntax
-  - Format: `engine1:weight1,engine2:weight2,...`
-  - Example: `--engines claude:3,cursor:1,opencode:2`
-  - Default weight of 1 for engines without explicit weight
-
-- `--engine-distribution STRATEGY`: Distribution strategy for multi-engine execution
-  - `round-robin`: Cycle through engines sequentially (default)
-  - `weighted`: Distribute based on engine weights
-  - `random`: Randomly assign engines
-  - `fill-first`: Fill one engine before moving to next
-
-**Examples Added:**
-1. Basic multi-engine with round-robin: `./ralphy.sh --parallel --engines claude,cursor,opencode`
-2. Weighted distribution: `./ralphy.sh --parallel --engines claude:5,cursor:1 --engine-distribution weighted`
-3. Fill-first strategy: `./ralphy.sh --parallel --engines claude,codex --engine-distribution fill-first`
-
-**Testing:**
-- Verified help output formatting with `grep` and `sed` commands
-- Confirmed multi-engine section appears correctly in help
-- Confirmed examples section includes multi-engine usage patterns
+Test file: ./test_backward_compatibility.sh
+Run with: ./test_backward_compatibility.sh
