@@ -1,46 +1,51 @@
-## Task: Implement validate_engines() function
+Task 7: Display parsed engines in dry-run output showing distribution strategy and engine list with weights
 
-### What was implemented:
+## Implementation Summary
 
-1. **Added multi-engine configuration variables** (lines 88-96 in ralphy.sh):
-   - `ENGINES` array: stores the list of engines to use
-   - `ENGINE_DISTRIBUTION`: distribution pattern string
-   - `ENGINE_WEIGHTS`: associative array for engine weights
-   - `ENGINE_AGENT_COUNT`: tracks number of agents per engine
-   - `ENGINE_COSTS`: tracks total cost per engine
-   - `ENGINE_SUCCESS`: tracks success count per engine
-   - `ENGINE_FAILURES`: tracks failure count per engine
-   - `VALID_ENGINES`: array of valid engine names (claude, opencode, cursor, codex, qwen, droid)
+Implemented dry-run display functionality for multi-engine support in ralphy.sh:
 
-2. **Implemented validate_engines() function** (lines 129-198 in ralphy.sh):
-   - Validates that engines in ENGINES array are in VALID_ENGINES list
-   - Checks that CLI commands exist for each engine:
-     - claude → claude
-     - opencode → opencode
-     - cursor → agent
-     - codex → codex
-     - qwen → qwen
-     - droid → droid
-   - Warns about missing CLI commands
-   - Filters ENGINES array to only include engines with available CLIs
-   - Returns error if no valid engines are available
-   - Returns error if invalid engine names are provided
+### Changes Made:
 
-3. **Created test file** (test_validate_engines.sh):
-   - Comprehensive test suite for validate_engines()
-   - Tests invalid engine names
-   - Tests valid engines with available CLIs
-   - Tests filtering of engines with missing CLIs
-   - Tests error when no engines have CLIs
-   - Tests multiple valid engines
-   - Tests cursor engine mapping to 'agent' CLI
-   - Gracefully handles bash version < 4.0 (associative arrays requirement)
+1. **Created display_engines_config() function** (lines 120-178)
+   - Displays engine configuration with weights
+   - Shows distribution strategy (round-robin, weighted, random, fill-first)
+   - Provides strategy explanation for each mode
+   - Maintains backward compatibility with single AI_ENGINE
 
-### Files modified:
-- ralphy.sh: Added multi-engine configuration variables and validate_engines() function
-- test_validate_engines.sh: Created new test file
+2. **Updated main banner section** (line 2959)
+   - Replaced inline engine display with call to display_engines_config()
+   - Improved formatting consistency (aligned "Source:" and "Config:" labels)
+
+3. **Added dry-run handling in run_parallel_tasks()** (lines 2227-2290)
+   - Displays "DRY RUN - Parallel Execution Plan" header
+   - Shows engine distribution configuration for multi-engine setups
+   - Includes task assignment preview (first 10 tasks) with simulated engine assignments
+   - Simulates engine assignment based on distribution strategy:
+     * round-robin: cycles through engines
+     * fill-first: fills engines sequentially
+     * random/weighted: uses first engine (simplified for preview)
+   - Lists all tasks to be executed
+   - Returns without executing any tasks
+
+### Features Implemented:
+
+- **Multi-engine display**: Shows comma-separated list of engines with weights (e.g., "claude:3, opencode:1")
+- **Strategy explanations**: Clear descriptions of each distribution strategy
+- **Assignment preview**: Shows how agents 1-10 would be assigned to engines
+- **Backward compatibility**: Falls back to single engine display when ENGINES array not set
+- **Consistent formatting**: Maintains ralphy's existing color scheme and layout
 
 ### Testing:
-- Bash syntax validation passed
-- Test suite created (requires Bash 4.0+ to run)
-- Function follows bash best practices with proper error handling
+
+- Created test_dry_run_display.sh for manual verification
+- Verified bash syntax with `bash -n ralphy.sh`
+- Tested that ralphy.sh runs successfully with --help flag
+
+### Dependencies:
+
+This implementation assumes the following variables exist (from tasks 1-6):
+- ENGINES array
+- ENGINE_DISTRIBUTION string
+- ENGINE_WEIGHTS associative array
+
+The code gracefully degrades when these variables are not set, maintaining backward compatibility with single-engine mode.
