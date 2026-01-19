@@ -796,6 +796,54 @@ load_project_context() {
   fi
 }
 
+# Load parallel execution configuration from config.yaml
+# Reads parallel.engines (with name and weight), parallel.distribution, and parallel.max_concurrent
+# Outputs: space-separated values in format "engine1:weight1 engine2:weight2|distribution|max_concurrent"
+# Returns empty string if config not found or yq not available
+load_parallel_config() {
+  [[ ! -f "$CONFIG_FILE" ]] && return
+
+  if ! command -v yq &>/dev/null; then
+    return
+  fi
+
+  # Check if parallel section exists
+  local has_parallel
+  has_parallel=$(yq -r '.parallel // ""' "$CONFIG_FILE" 2>/dev/null)
+  [[ -z "$has_parallel" ]] && return
+
+  # Load engines with weights
+  local engines_list=""
+  local engine_count
+  engine_count=$(yq -r '.parallel.engines // [] | length' "$CONFIG_FILE" 2>/dev/null)
+
+  if [[ "$engine_count" -gt 0 ]]; then
+    for ((i=0; i<engine_count; i++)); do
+      local name weight
+      name=$(yq -r ".parallel.engines[$i].name // \"\"" "$CONFIG_FILE" 2>/dev/null)
+      weight=$(yq -r ".parallel.engines[$i].weight // 1" "$CONFIG_FILE" 2>/dev/null)
+
+      if [[ -n "$name" ]]; then
+        [[ -n "$engines_list" ]] && engines_list+=" "
+        engines_list+="${name}:${weight}"
+      fi
+    done
+  fi
+
+  # Load distribution strategy
+  local distribution
+  distribution=$(yq -r '.parallel.distribution // "round-robin"' "$CONFIG_FILE" 2>/dev/null)
+
+  # Load max concurrent
+  local max_concurrent
+  max_concurrent=$(yq -r '.parallel.max_concurrent // 3' "$CONFIG_FILE" 2>/dev/null)
+
+  # Output in parseable format
+  if [[ -n "$engines_list" ]]; then
+    echo "${engines_list}|${distribution}|${max_concurrent}"
+  fi
+}
+
 # Log task to progress file
 log_task_history() {
   local task="$1"

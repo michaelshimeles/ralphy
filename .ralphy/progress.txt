@@ -1,14 +1,14 @@
-## Agent 25 - Include engine name in per-agent result output
+# Ralphy Progress Log
 
-### Changes Made:
-1. Added `get_engine_name()` helper function to return engine display names (OpenCode, Cursor Agent, Codex, Qwen-Code, Factory Droid, Claude Code, or Claude Code (sonnet))
-2. Updated `run_parallel_agent()` to write engine name to output_file in all cases (success and failure)
-3. Exported CLAUDE_MODEL variable so it's available in agent subprocesses
-4. Modified batch results display to parse and show engine name in format: "Agent N (engine): task"
-5. Engine name is displayed in dim color using ${DIM} formatting
-
-### Format:
-- Success: `✓ Agent N (Engine Name): task → branch`
-- Failure: `✗ Agent N (Engine Name): task (error below)`
-
-The engine name now appears in parentheses after the agent number in all per-agent result outputs.
+[2026-01-19] Implemented load_parallel_config() function
+- Added load_parallel_config() function in ralphy.sh (lines 428-474)
+- Function loads parallel execution config from .ralphy/config.yaml using yq
+- Reads parallel.engines array with name and weight fields
+- Reads parallel.distribution strategy (round-robin, weighted, random, fill-first)
+- Reads parallel.max_concurrent for maximum concurrent tasks
+- Returns space-separated format: "engine1:weight1 engine2:weight2|distribution|max_concurrent"
+- Handles missing config gracefully (returns empty string)
+- Defaults: weight=1, distribution=round-robin, max_concurrent=3
+- Created .ralphy/config.yaml with example parallel configuration
+- Created comprehensive test suites (test_load_parallel_config.sh and test_load_parallel_config_extended.sh)
+- All 9 test cases pass successfully

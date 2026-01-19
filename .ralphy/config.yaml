@@ -1,0 +1,44 @@
+# Ralphy Configuration
+# https://github.com/michaelshimeles/ralphy
+
+# Project info (auto-detected, edit if needed)
+project:
+  name: "ralphy"
+  language: "bash"
+  framework: ""
+  description: "Orchestration framework for AI code agents"
+
+# Commands (auto-detected from package.json/pyproject.toml)
+commands:
+  test: ""
+  lint: ""
+  build: ""
+
+# Rules - instructions the AI MUST follow
+# These are injected into every prompt
+rules: []
+  # Examples:
+  # - "Always use TypeScript strict mode"
+  # - "Follow the error handling pattern in src/utils/errors.ts"
+
+# Boundaries - files/folders the AI should not modify
+boundaries:
+  never_touch: []
+    # Examples:
+    # - "src/legacy/**"
+    # - "migrations/**"
+
+# Parallel execution configuration
+parallel:
+  # List of engines to use for parallel execution
+  engines:
+    - name: "claude"
+      weight: 2
+    - name: "opencode"
+      weight: 1
+
+  # Distribution strategy: round-robin, weighted, random, fill-first
+  distribution: "weighted"
+
+  # Maximum number of concurrent tasks
+  max_concurrent: 3
