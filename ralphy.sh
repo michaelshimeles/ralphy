@@ -44,6 +44,11 @@ PR_DRAFT=false
 # Parallel execution
 PARALLEL=false
 MAX_PARALLEL=3
+ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
+
+# Multi-engine support
+declare -a ENGINES=()
+declare -A ENGINE_WEIGHTS=()
 
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
@@ -1060,6 +1065,18 @@ ${BOLD}PARALLEL EXECUTION:${RESET}
   --parallel          Run independent tasks in parallel
   --max-parallel N    Max concurrent tasks (default: 3)
 
+${BOLD}MULTI-ENGINE OPTIONS:${RESET}
+  --engines LIST      Comma-separated list of engines to use with optional weights
+                      Format: engine1:weight1,engine2:weight2,...
+                      Example: --engines claude:3,cursor:1,opencode:2
+                      Engines without weights default to weight of 1
+  --engine-distribution STRATEGY
+                      How to distribute tasks across engines (default: round-robin)
+                      - round-robin:  Cycle through engines sequentially
+                      - weighted:     Distribute based on engine weights
+                      - random:       Randomly assign engines
+                      - fill-first:   Fill one engine before moving to next
+
 ${BOLD}GIT BRANCH OPTIONS:${RESET}
   --branch-per-task   Create a new git branch for each task
   --base-branch NAME  Base branch to create task branches from (default: current)
@@ -1090,6 +1107,14 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
   ./ralphy.sh --yaml tasks.yaml            # Use YAML task file
   ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
+
+  # Multi-engine parallel execution
+  ./ralphy.sh --parallel --engines claude,cursor,opencode
+                                           # Use 3 engines with round-robin
+  ./ralphy.sh --parallel --engines claude:5,cursor:1 --engine-distribution weighted
+                                           # Weighted distribution (5:1 ratio)
+  ./ralphy.sh --parallel --engines claude,codex --engine-distribution fill-first
+                                           # Fill claude first, then codex
 
 ${BOLD}PRD FORMATS:${RESET}
   Markdown (PRD.md):
@@ -1221,6 +1246,22 @@ parse_args() {
         ;;
       --max-parallel)
         MAX_PARALLEL="${2:-3}"
+        shift 2
+        ;;
+      --engine-distribution)
+        case "${2:-}" in
+          round-robin|weighted|random|fill-first)
+            ENGINE_DISTRIBUTION="$2"
+            ;;
+          "")
+            log_error "--engine-distribution requires an argument"
+            exit 1
+            ;;
+          *)
+            log_error "Invalid engine distribution: $2. Must be one of: round-robin, weighted, random, fill-first"
+            exit 1
+            ;;
+        esac
         shift 2
         ;;
       --branch-per-task)

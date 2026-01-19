@@ -1,47 +1,72 @@
-Improved error messages for multi-engine support:
+## Completed Tasks
 
-1. Unknown engine error - Now lists valid options
-   - Added VALID_ENGINES array with all supported engines
-   - validate_engines() checks against this list and shows valid options on error
-   - Error message format: "Unknown engine(s): <invalid> / Valid engines are: claude opencode cursor codex qwen droid"
+### Add --engine-distribution CLI argument with validation
+- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
 
-2. Invalid weight error - Shows expected format
-   - --engines argument parser validates weight format
-   - Checks weights are positive integers (> 0)
-   - Error messages:
-     * "Invalid weight for engine 'X': weights must be positive integers (got: Y)"
-     * "Expected format: --engines engine:weight (e.g., claude:2,cursor:1)"
-     * "Invalid engine specification: 'X'"
-     * Shows examples for proper format
+### Implement --engines CLI argument parsing in parse_args()
 
-3. No valid engines error - Suggests solutions
-   - validate_engines() filters engines to only those with available CLIs
-   - If no engines remain after filtering, shows comprehensive error:
-     * "No valid engines available."
-     * Lists all valid engines with installation links
-     * Suggests verifying CLI is in PATH
-     * Suggests trying different engine flags
+**Location:** ralphy.sh:712-748
 
-4. Missing CLI error - Shows installation hints
-   - validate_engines() warns about missing CLIs with installation instructions
-   - Each engine has specific installation hint:
-     * Claude: https://github.com/anthropics/claude-code
-     * OpenCode: https://opencode.ai/docs/
-     * Cursor: Install Cursor and ensure 'agent' is in PATH
-     * Codex: Ensure 'codex' is in your PATH
-     * Qwen: Ensure 'qwen' is in your PATH
-     * Droid: https://docs.factory.ai/cli/getting-started/quickstart
+**What was implemented:**
+1. Added `ENGINES` array and `ENGINE_WEIGHTS` associative array variable declarations (lines 48-49)
+2. Implemented `--engines` argument parsing in parse_args() function (lines 712-748)
 
-Implementation details:
-- Added multi-engine configuration variables (lines 88-96): ENGINES, ENGINE_DISTRIBUTION, ENGINE_WEIGHTS, ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES, VALID_ENGINES
-- Implemented deduplicate_engines() function (lines 833-867) to handle duplicate engine names
-- Implemented validate_engines() function (lines 870-1008) with improved error messages
-- Added --engines CLI argument parsing (lines 723-762) with weight validation
-- Added validate_engines() and deduplicate_engines() calls in main() (lines 2990-2991)
-- Created test_error_messages.sh to validate error message improvements
+**Features:**
+- Parses comma-separated list of engines into ENGINES array
+- Supports weight syntax: `engine:weight` (e.g., `claude:5`)
+- Validates that weights are positive integers (rejects zero and negative values)
+- Supports engine names without weights (defaults to weight of 1)
+- Allows alphanumeric engine names with hyphens and underscores
+- Provides clear error messages for invalid specifications
 
-Files modified:
-- ralphy.sh: Added multi-engine support and improved error messages
-- test_error_messages.sh: Created comprehensive test suite for error messages
+**Examples:**
+- `--engines claude` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=1
+- `--engines claude:5` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=5
+- `--engines claude:3,opencode,cursor:2` → ENGINES=(claude opencode cursor), ENGINE_WEIGHTS[claude]=3, ENGINE_WEIGHTS[opencode]=1, ENGINE_WEIGHTS[cursor]=2
 
-Note: Tests require bash 4+ for associative array support. Script syntax is valid.
+**Validation:**
+- Engine names must match pattern: `^[a-zA-Z0-9_-]+$`
+- Weight syntax must match pattern: `^([a-zA-Z0-9_-]+):([0-9]+)$`
+- Weights must be positive integers (> 0)
+- Invalid formats are rejected with error messages
+
+**Testing:**
+Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
+- Valid engine names (with/without hyphens/underscores)
+- Engine with weight syntax parsing
+- Comma-separated list splitting
+- Zero and negative weight rejection
+- Invalid format rejection
+- Special character rejection
+
+All tests passed successfully.
+
+### Update --help output with --engines and --engine-distribution flags
+
+**Location:** ralphy.sh:619-629 (multi-engine options), ralphy.sh:662-668 (examples)
+
+**What was implemented:**
+1. Added new "MULTI-ENGINE OPTIONS" section to help output (lines 619-629)
+2. Added multi-engine examples to the EXAMPLES section (lines 662-668)
+
+**Documentation Added:**
+- `--engines LIST`: Comma-separated list of engines with optional weight syntax
+  - Format: `engine1:weight1,engine2:weight2,...`
+  - Example: `--engines claude:3,cursor:1,opencode:2`
+  - Default weight of 1 for engines without explicit weight
+
+- `--engine-distribution STRATEGY`: Distribution strategy for multi-engine execution
+  - `round-robin`: Cycle through engines sequentially (default)
+  - `weighted`: Distribute based on engine weights
+  - `random`: Randomly assign engines
+  - `fill-first`: Fill one engine before moving to next
+
+**Examples Added:**
+1. Basic multi-engine with round-robin: `./ralphy.sh --parallel --engines claude,cursor,opencode`
+2. Weighted distribution: `./ralphy.sh --parallel --engines claude:5,cursor:1 --engine-distribution weighted`
+3. Fill-first strategy: `./ralphy.sh --parallel --engines claude,codex --engine-distribution fill-first`
+
+**Testing:**
+- Verified help output formatting with `grep` and `sed` commands
+- Confirmed multi-engine section appears correctly in help
+- Confirmed examples section includes multi-engine usage patterns
