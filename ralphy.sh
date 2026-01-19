@@ -2772,7 +2772,8 @@ run_parallel_tasks() {
         echo "engine=$AI_ENGINE" >> "$status_file"
 
         # Show initial status
-        printf "  ${CYAN}◉${RESET} Agent %d: %s\n" "$agent_num" "${task:0:50}"
+        local engine_name=$(get_engine_short_name)
+        printf "  ${CYAN}◉${RESET} Agent %d (%s): %s\n" "$agent_num" "$engine_name" "${task:0:50}"
 
         # Run agent in background
         (
@@ -2845,11 +2846,12 @@ run_parallel_tasks() {
             ;;
         esac
 
-        printf "  ${color}%s${RESET} Agent %d: %s%s\n" "$icon" "$agent_num" "${task:0:45}" "$branch_info"
+        local engine_name=$(get_engine_short_name)
+        printf "  ${color}%s${RESET} Agent %d (%s): %s%s\n" "$icon" "$agent_num" "$engine_name" "${task:0:45}" "$branch_info"
 
         # Show log for failed agents
         if [[ "$status" == "failed" ]] && [[ -s "$log_file" ]]; then
-          echo "${DIM}    ┌─ Agent $agent_num log:${RESET}"
+          echo "${DIM}    ┌─ Agent $agent_num ($engine_name) log:${RESET}"
           sed 's/^/    │ /' "$log_file" | head -20
           local log_lines=$(wc -l < "$log_file")
           if [[ $log_lines -gt 20 ]]; then

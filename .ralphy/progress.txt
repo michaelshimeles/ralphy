@@ -1,36 +1,33 @@
-## Task: Parse engine from status file in monitoring loop using grep for engine= line
+## Agent 18 - Update status display format to show engine name
 
-### Implementation Summary
+### Changes Made:
 
-Modified the status file format and monitoring loop to support engine tracking:
+1. Added `get_engine_short_name()` helper function (ralphy.sh:120-128)
+   - Returns short engine name based on AI_ENGINE global variable
+   - Supports: claude, opencode, cursor, codex, qwen, droid
 
-1. **Status File Format Enhancement**
-   - Extended status file format to include engine information on a second line
-   - Format: Line 1 contains status (waiting, setting up, running, done, failed)
-   - Format: Line 2 contains `engine=<engine_name>`
+2. Updated initial agent status display (ralphy.sh:2264)
+   - Changed format from "Agent N: status" to "Agent N (engine): status"
+   - Example: "Agent 1 (claude): Implement feature X"
 
-2. **Status File Writes Updated**
-   - Added `echo "engine=$AI_ENGINE" >> "$status_file"` after all status writes in run_parallel_agent()
-   - Locations updated:
-     - Initial "setting up" status (line 1962)
-     - Worktree creation failure (line 1981)
-     - "running" status (line 1988)
-     - No commits failure (line 2120)
-     - Success "done" status (line 2142)
-     - Final "failed" status (line 2151)
-     - Initial "waiting" status in monitoring loop (line 2265)
+3. Updated final agent status display (ralphy.sh:2391)
+   - Changed format from "Agent N: status" to "Agent N (engine): status"
+   - Includes success/failure icon and branch info
+   - Example: "✓ Agent 1 (claude): Implement feature X [branch-name]"
 
-3. **Monitoring Loop Enhancement**
-   - Modified status parsing to read only the first line: `head -n 1 "$status_file"`
-   - Added engine parsing using grep: `grep "^engine=" "$status_file" | cut -d= -f2`
-   - Location: ralphy.sh lines 2295-2296
+4. Updated failed agent log header (ralphy.sh:2395)
+   - Changed format from "Agent N log:" to "Agent N (engine) log:"
+   - Example: "┌─ Agent 1 (claude) log:"
 
-### Technical Details
+5. Created test suite (test_engine_display.sh)
+   - Tests all 6 supported engines plus unknown/default case
+   - All 7 tests passing
 
-The engine variable is now available in the monitoring loop for each agent, enabling future features like:
-- Displaying engine name alongside agent status
-- Color-coding status by engine
-- Tracking per-engine metrics
+### Files Modified:
+- ralphy.sh (3 display locations + 1 helper function)
+- test_engine_display.sh (new test file)
 
-### Files Modified
-- ralphy.sh: Updated status file format and monitoring loop parsing
+### Testing:
+- Unit tests created and passing (7/7)
+- Function correctly returns engine names for all supported engines
+- Default case (unknown engine) correctly returns "claude"
