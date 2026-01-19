@@ -1,0 +1,5 @@
+Created examples/multi-engine-basic.yaml with simple two-engine round-robin configuration.
+- File includes Claude and OpenCode engines with equal weight (1:1)
+- Uses round-robin distribution strategy
+- Sets max_concurrent to 3 agents
+- Includes 6 sample tasks demonstrating typical development workflow
