@@ -44,11 +44,6 @@ PR_DRAFT=false
 # Parallel execution
 PARALLEL=false
 MAX_PARALLEL=3
-ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
-
-# Multi-engine support
-declare -a ENGINES=()
-declare -A ENGINE_WEIGHTS=()
 
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
@@ -92,7 +87,7 @@ ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engines to use in rotation
-ENGINE_DISTRIBUTION=""  # Distribution pattern (e.g., "claude:2,opencode:1")
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, or fill-first
 declare -A ENGINE_WEIGHTS=()  # Weight/priority for each engine
 declare -A ENGINE_AGENT_COUNT=()  # Number of agents assigned to each engine
 declare -A ENGINE_COSTS=()  # Total cost per engine
@@ -880,6 +875,17 @@ parse_args() {
         ;;
     esac
   done
+
+  # Backward compatibility: maintain AI_ENGINE for single-engine usage
+  local num_engines="${#ENGINES[@]}"
+  if [[ "$num_engines" -eq 1 ]]; then
+    # If exactly one engine specified, set AI_ENGINE for backward compatibility
+    AI_ENGINE="${ENGINES[0]}"
+  elif [[ "$num_engines" -eq 0 ]]; then
+    # If no engines specified, populate ENGINES with default AI_ENGINE
+    ENGINES=("$AI_ENGINE")
+    ENGINE_WEIGHTS["$AI_ENGINE"]=1
+  fi
 }
 
 # ============================================

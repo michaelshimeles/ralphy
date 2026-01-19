@@ -55,3 +55,40 @@ Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
 - Special character rejection
 
 All tests passed successfully.
+
+### Add backward compatibility after argument parsing
+
+**Location:** ralphy.sh:879-890
+
+**What was implemented:**
+Added backward compatibility logic at the end of parse_args() function to maintain compatibility with existing single-engine usage patterns.
+
+**Logic:**
+1. If exactly one engine is specified in ENGINES array:
+   - Set AI_ENGINE to that engine for backward compatibility
+   - Ensures single-engine workflows continue to work seamlessly
+
+2. If no engines are specified (empty ENGINES array):
+   - Populate ENGINES array with the default AI_ENGINE value
+   - Set ENGINE_WEIGHTS for that engine to 1
+   - Ensures existing code that doesn't use --engines still works
+
+3. If multiple engines are specified:
+   - No backward compatibility modifications are applied
+   - AI_ENGINE and ENGINES remain as configured
+
+**Benefits:**
+- Maintains backward compatibility with existing scripts and workflows
+- Allows gradual migration to multi-engine support
+- Single-engine flags (--claude, --opencode, etc.) continue to work as before
+- Zero-engine scenarios default to claude engine
+
+**Testing:**
+Created comprehensive test suite in test_backward_compatibility.sh with 9 test cases:
+- No engines with default AI_ENGINE (claude)
+- No engines with custom AI_ENGINE (opencode)
+- Single engine specifications (cursor, opencode, droid, qwen, codex)
+- Multiple engines (2 and 3 engines) - verifies no modification
+- All tests validate both AI_ENGINE and ENGINES array state
+
+All tests passed successfully.
