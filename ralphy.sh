@@ -115,6 +115,42 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
+# Get display name with color for AI engine
+get_engine_display() {
+  case "$AI_ENGINE" in
+    opencode) echo "${CYAN}OpenCode${RESET}" ;;
+    cursor)   echo "${YELLOW}Cursor Agent${RESET}" ;;
+    codex)    echo "${BLUE}Codex${RESET}" ;;
+    qwen)     echo "${GREEN}Qwen-Code${RESET}" ;;
+    droid)    echo "${MAGENTA}Factory Droid${RESET}" ;;
+    *)        echo "${MAGENTA}Claude Code${RESET}" ;;
+  esac
+}
+
+# Check if selected AI engine is available
+check_ai_engine() {
+  case "$AI_ENGINE" in
+    opencode)
+      command -v opencode &>/dev/null || { log_error "OpenCode CLI not found. Install from: https://opencode.ai/docs/"; exit 1; }
+      ;;
+    cursor)
+      command -v agent &>/dev/null || { log_error "Cursor agent CLI not found. Make sure Cursor is installed and 'agent' is in your PATH."; exit 1; }
+      ;;
+    codex)
+      command -v codex &>/dev/null || { log_error "Codex CLI not found. Make sure 'codex' is in your PATH."; exit 1; }
+      ;;
+    qwen)
+      command -v qwen &>/dev/null || { log_error "Qwen-Code CLI not found. Make sure 'qwen' is in your PATH."; exit 1; }
+      ;;
+    droid)
+      command -v droid &>/dev/null || { log_error "Factory Droid CLI not found. Install from https://docs.factory.ai/cli/getting-started/quickstart"; exit 1; }
+      ;;
+    *)
+      command -v claude &>/dev/null || { log_error "Claude Code CLI not found. Install from: https://github.com/anthropics/claude-code"; exit 1; }
+      ;;
+  esac
+}
+
 # ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
@@ -814,8 +850,6 @@ parse_args() {
 # ============================================
 
 check_requirements() {
-  local missing=()
-
   # Check for PRD source
   case "$PRD_SOURCE" in
     markdown)
@@ -851,50 +885,7 @@ check_requirements() {
   esac
 
   # Check for AI CLI
-  case "$AI_ENGINE" in
-    opencode)
-      if ! command -v opencode &>/dev/null; then
-        log_error "OpenCode CLI not found."
-        log_info "Install from: https://opencode.ai/docs/"
-        exit 1
-      fi
-      ;;
-    codex)
-      if ! command -v codex &>/dev/null; then
-        log_error "Codex CLI not found."
-        log_info "Make sure 'codex' is in your PATH."
-        exit 1
-      fi
-      ;;
-    cursor)
-      if ! command -v agent &>/dev/null; then
-        log_error "Cursor agent CLI not found."
-        log_info "Make sure Cursor is installed and 'agent' is in your PATH."
-        exit 1
-      fi
-      ;;
-    qwen)
-      if ! command -v qwen &>/dev/null; then
-        log_error "Qwen-Code CLI not found."
-        log_info "Make sure 'qwen' is in your PATH."
-        exit 1
-      fi
-      ;;
-    droid)
-      if ! command -v droid &>/dev/null; then
-        log_error "Factory Droid CLI not found. Install from https://docs.factory.ai/cli/getting-started/quickstart"
-        exit 1
-      fi
-      ;;
-    *)
-      if ! command -v claude &>/dev/null; then
-        log_error "Claude Code CLI not found."
-        log_info "Install from: https://github.com/anthropics/claude-code"
-        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen"
-        exit 1
-      fi
-      ;;
-  esac
+  check_ai_engine
 
   # Check for jq (required for JSON parsing)
   if ! command -v jq &>/dev/null; then
@@ -906,11 +897,6 @@ check_requirements() {
   if [[ "$CREATE_PR" == true ]] && ! command -v gh &>/dev/null; then
     log_error "GitHub CLI (gh) is required for --create-pr. Install from https://cli.github.com/"
     exit 1
-  fi
-
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    log_warn "Missing optional dependencies: ${missing[*]}"
-    log_warn "Some features may not work properly"
   fi
 
   # Check for git
@@ -1255,42 +1241,35 @@ monitor_progress() {
     local mins=$((elapsed / 60))
     local secs=$((elapsed % 60))
 
-    # Check latest output for step indicators
+    # Detect current step from output (ordered by priority: later stages first)
     if [[ -f "$file" ]] && [[ -s "$file" ]]; then
       local content
       content=$(tail -c 5000 "$file" 2>/dev/null || true)
 
-      if echo "$content" | grep -qE 'git commit|"command":"git commit'; then
-        current_step="Committing"
-      elif echo "$content" | grep -qE 'git add|"command":"git add'; then
-        current_step="Staging"
-      elif echo "$content" | grep -qE 'progress\.txt'; then
-        current_step="Logging"
-      elif echo "$content" | grep -qE 'PRD\.md|tasks\.yaml'; then
-        current_step="Updating PRD"
-      elif echo "$content" | grep -qE 'lint|eslint|biome|prettier'; then
-        current_step="Linting"
-      elif echo "$content" | grep -qE 'vitest|jest|bun test|npm test|pytest|go test'; then
-        current_step="Testing"
-      elif echo "$content" | grep -qE '\.test\.|\.spec\.|__tests__|_test\.go'; then
-        current_step="Writing tests"
-      elif echo "$content" | grep -qE '"tool":"[Ww]rite"|"tool":"[Ee]dit"|"name":"write"|"name":"edit"'; then
-        current_step="Implementing"
-      elif echo "$content" | grep -qE '"tool":"[Rr]ead"|"tool":"[Gg]lob"|"tool":"[Gg]rep"|"name":"read"|"name":"glob"|"name":"grep"'; then
-        current_step="Reading code"
-      fi
+      # Use case with pattern matching for cleaner step detection
+      case "$content" in
+        *'git commit'*|*'"command":"git commit'*)           current_step="Committing" ;;
+        *'git add'*|*'"command":"git add'*)                 current_step="Staging" ;;
+        *'progress.txt'*)                                   current_step="Logging" ;;
+        *'PRD.md'*|*'tasks.yaml'*)                          current_step="Updating PRD" ;;
+        *lint*|*eslint*|*biome*|*prettier*)                 current_step="Linting" ;;
+        *vitest*|*jest*|*'bun test'*|*'npm test'*|*pytest*|*'go test'*) current_step="Testing" ;;
+        *.test.*|*.spec.*|*__tests__*|*_test.go*)           current_step="Writing tests" ;;
+        *'"tool":"Write"'*|*'"tool":"Edit"'*|*'"name":"write"'*|*'"name":"edit"'*) current_step="Implementing" ;;
+        *'"tool":"Read"'*|*'"tool":"Glob"'*|*'"tool":"Grep"'*|*'"name":"read"'*|*'"name":"glob"'*|*'"name":"grep"'*) current_step="Reading code" ;;
+      esac
     fi
 
     local spinner_char="${spinstr:$spin_idx:1}"
-    local step_color=""
-    
+    local step_color
+
     # Color-code steps
     case "$current_step" in
-      "Thinking"|"Reading code") step_color="$CYAN" ;;
-      "Implementing"|"Writing tests") step_color="$MAGENTA" ;;
-      "Testing"|"Linting") step_color="$YELLOW" ;;
-      "Staging"|"Committing") step_color="$GREEN" ;;
-      *) step_color="$BLUE" ;;
+      Thinking|"Reading code")       step_color="$CYAN" ;;
+      Implementing|"Writing tests")  step_color="$MAGENTA" ;;
+      Testing|Linting)               step_color="$YELLOW" ;;
+      Staging|Committing)            step_color="$GREEN" ;;
+      *)                             step_color="$BLUE" ;;
     esac
 
     # Use tput for cleaner line clearing
@@ -1582,62 +1561,40 @@ parse_ai_result() {
       input_tokens=0
       output_tokens=0
       ;;
-    qwen)
-      # Qwen-Code stream-json parsing (similar to Claude Code)
-      local result_line
-      result_line=$(echo "$result" | grep '"type":"result"' | tail -1)
-
-      if [[ -n "$result_line" ]]; then
-        response=$(echo "$result_line" | jq -r '.result // "No result text"' 2>/dev/null || echo "Could not parse result")
-        input_tokens=$(echo "$result_line" | jq -r '.usage.input_tokens // 0' 2>/dev/null || echo "0")
-        output_tokens=$(echo "$result_line" | jq -r '.usage.output_tokens // 0' 2>/dev/null || echo "0")
-      fi
-
-      # Fallback when no response text was parsed, similar to OpenCode behavior
-      if [[ -z "$response" ]]; then
-        response="Task completed"
-      fi
-      ;;
     droid)
-      # Droid stream-json parsing
-      # Look for completion event which has the final result
+      # Droid stream-json parsing - uses completion event with different field names
       local completion_line
       completion_line=$(echo "$result" | grep '"type":"completion"' | tail -1)
 
       if [[ -n "$completion_line" ]]; then
         response=$(echo "$completion_line" | jq -r '.finalText // "Task completed"' 2>/dev/null || echo "Task completed")
-        # Droid provides duration_ms in completion event
         local dur_ms
         dur_ms=$(echo "$completion_line" | jq -r '.durationMs // 0' 2>/dev/null || echo "0")
-        if [[ "$dur_ms" =~ ^[0-9]+$ ]] && [[ "$dur_ms" -gt 0 ]]; then
-          # Store duration for tracking
-          actual_cost="duration:$dur_ms"
-        fi
+        [[ "$dur_ms" =~ ^[0-9]+$ ]] && [[ "$dur_ms" -gt 0 ]] && actual_cost="duration:$dur_ms"
       fi
-
-      # Tokens remain 0 for Droid (not exposed in exec mode)
       input_tokens=0
       output_tokens=0
       ;;
     codex)
       if [[ -n "$CODEX_LAST_MESSAGE_FILE" ]] && [[ -f "$CODEX_LAST_MESSAGE_FILE" ]]; then
         response=$(cat "$CODEX_LAST_MESSAGE_FILE" 2>/dev/null || echo "")
-        # Codex sometimes prefixes a generic completion line; drop it for readability.
+        # Codex sometimes prefixes a generic completion line; drop it for readability
         response=$(printf '%s' "$response" | sed '1{/^Task completed successfully\.[[:space:]]*$/d;}')
       fi
       input_tokens=0
       output_tokens=0
       ;;
     *)
-      # Claude Code stream-json parsing
+      # Claude Code and Qwen-Code use identical stream-json format
       local result_line
       result_line=$(echo "$result" | grep '"type":"result"' | tail -1)
-      
+
       if [[ -n "$result_line" ]]; then
         response=$(echo "$result_line" | jq -r '.result // "No result text"' 2>/dev/null || echo "Could not parse result")
         input_tokens=$(echo "$result_line" | jq -r '.usage.input_tokens // 0' 2>/dev/null || echo "0")
         output_tokens=$(echo "$result_line" | jq -r '.usage.output_tokens // 0' 2>/dev/null || echo "0")
       fi
+      [[ -z "$response" ]] && response="Task completed"
       ;;
   esac
   
@@ -2689,52 +2646,47 @@ show_summary() {
   echo "${BOLD}============================================${RESET}"
   echo ""
   echo "${BOLD}>>> Cost Summary${RESET}"
-  
+
   # Cursor and Droid don't provide token usage, but do provide duration
-  if [[ "$AI_ENGINE" == "cursor" ]] || [[ "$AI_ENGINE" == "droid" ]]; then
-    echo "${DIM}Token usage not available (CLI doesn't expose this data)${RESET}"
-    if [[ "$total_duration_ms" -gt 0 ]]; then
-      local dur_sec=$((total_duration_ms / 1000))
-      local dur_min=$((dur_sec / 60))
-      local dur_sec_rem=$((dur_sec % 60))
-      if [[ "$dur_min" -gt 0 ]]; then
-        echo "Total API time: ${dur_min}m ${dur_sec_rem}s"
-      else
-        echo "Total API time: ${dur_sec}s"
+  case "$AI_ENGINE" in
+    cursor|droid)
+      echo "${DIM}Token usage not available (CLI doesn't expose this data)${RESET}"
+      if [[ "$total_duration_ms" -gt 0 ]]; then
+        local dur_sec=$((total_duration_ms / 1000))
+        local dur_min=$((dur_sec / 60))
+        local dur_sec_rem=$((dur_sec % 60))
+        if [[ "$dur_min" -gt 0 ]]; then
+          echo "Total API time: ${dur_min}m ${dur_sec_rem}s"
+        else
+          echo "Total API time: ${dur_sec}s"
+        fi
       fi
-    fi
-  else
-    echo "Input tokens:  $total_input_tokens"
-    echo "Output tokens: $total_output_tokens"
-    echo "Total tokens:  $((total_input_tokens + total_output_tokens))"
-    
-    # Show actual cost if available (OpenCode provides this), otherwise estimate
-    if [[ "$AI_ENGINE" == "opencode" ]] && command -v bc &>/dev/null; then
-      local has_actual_cost
-      has_actual_cost=$(echo "$total_actual_cost > 0" | bc 2>/dev/null || echo "0")
-      if [[ "$has_actual_cost" == "1" ]]; then
+      ;;
+    *)
+      echo "Input tokens:  $total_input_tokens"
+      echo "Output tokens: $total_output_tokens"
+      echo "Total tokens:  $((total_input_tokens + total_output_tokens))"
+
+      # Show actual cost if available (OpenCode provides this), otherwise estimate
+      local cost
+      if [[ "$AI_ENGINE" == "opencode" ]] && command -v bc &>/dev/null && [[ $(echo "$total_actual_cost > 0" | bc 2>/dev/null) == "1" ]]; then
         echo "Actual cost:   \$${total_actual_cost}"
       else
-        local cost
         cost=$(calculate_cost "$total_input_tokens" "$total_output_tokens")
         echo "Est. cost:     \$$cost"
       fi
-    else
-      local cost
-      cost=$(calculate_cost "$total_input_tokens" "$total_output_tokens")
-      echo "Est. cost:     \$$cost"
-    fi
-  fi
-  
+      ;;
+  esac
+
   # Show branches if created
-  if [[ -n "${task_branches[*]+"${task_branches[*]}"}" ]]; then
+  if [[ ${#task_branches[@]} -gt 0 ]]; then
     echo ""
     echo "${BOLD}>>> Branches Created${RESET}"
     for branch in "${task_branches[@]}"; do
       echo "  - $branch"
     done
   fi
-  
+
   echo "${BOLD}============================================${RESET}"
 }
 
@@ -2770,14 +2722,7 @@ main() {
     trap 'exit 130' INT TERM HUP
 
     # Check basic requirements (AI engine, git)
-    case "$AI_ENGINE" in
-      claude) command -v claude &>/dev/null || { log_error "Claude Code CLI not found"; exit 1; } ;;
-      opencode) command -v opencode &>/dev/null || { log_error "OpenCode CLI not found"; exit 1; } ;;
-      cursor) command -v agent &>/dev/null || { log_error "Cursor agent CLI not found"; exit 1; } ;;
-      codex) command -v codex &>/dev/null || { log_error "Codex CLI not found"; exit 1; } ;;
-      qwen) command -v qwen &>/dev/null || { log_error "Qwen-Code CLI not found"; exit 1; } ;;
-      droid) command -v droid &>/dev/null || { log_error "Factory Droid CLI not found"; exit 1; } ;;
-    esac
+    check_ai_engine
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
       log_error "Not a git repository"
@@ -2787,16 +2732,7 @@ main() {
     # Show brownfield banner
     echo "${BOLD}============================================${RESET}"
     echo "${BOLD}Ralphy${RESET} - Single Task Mode"
-    local engine_display
-    case "$AI_ENGINE" in
-      opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-      cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-      codex) engine_display="${BLUE}Codex${RESET}" ;;
-      qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-      droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-      *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
-    esac
-    echo "Engine: $engine_display"
+    echo "Engine: $(get_engine_display)"
     if [[ -d "$RALPHY_DIR" ]]; then
       echo "Config: ${GREEN}$RALPHY_DIR/${RESET}"
     else
@@ -2822,16 +2758,7 @@ main() {
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
-  local engine_display
-  case "$AI_ENGINE" in
-    opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-    cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-    codex) engine_display="${BLUE}Codex${RESET}" ;;
-    qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-    *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
-  esac
-  echo "Engine: $engine_display"
+  echo "Engine: $(get_engine_display)"
   echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   if [[ -d "$RALPHY_DIR" ]]; then
     echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
