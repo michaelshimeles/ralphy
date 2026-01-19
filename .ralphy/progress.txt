@@ -40,3 +40,33 @@ Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
 - Special character rejection
 
 All tests passed successfully.
+
+### Update --help output with --engines and --engine-distribution flags
+
+**Location:** ralphy.sh:619-629 (multi-engine options), ralphy.sh:662-668 (examples)
+
+**What was implemented:**
+1. Added new "MULTI-ENGINE OPTIONS" section to help output (lines 619-629)
+2. Added multi-engine examples to the EXAMPLES section (lines 662-668)
+
+**Documentation Added:**
+- `--engines LIST`: Comma-separated list of engines with optional weight syntax
+  - Format: `engine1:weight1,engine2:weight2,...`
+  - Example: `--engines claude:3,cursor:1,opencode:2`
+  - Default weight of 1 for engines without explicit weight
+
+- `--engine-distribution STRATEGY`: Distribution strategy for multi-engine execution
+  - `round-robin`: Cycle through engines sequentially (default)
+  - `weighted`: Distribute based on engine weights
+  - `random`: Randomly assign engines
+  - `fill-first`: Fill one engine before moving to next
+
+**Examples Added:**
+1. Basic multi-engine with round-robin: `./ralphy.sh --parallel --engines claude,cursor,opencode`
+2. Weighted distribution: `./ralphy.sh --parallel --engines claude:5,cursor:1 --engine-distribution weighted`
+3. Fill-first strategy: `./ralphy.sh --parallel --engines claude,codex --engine-distribution fill-first`
+
+**Testing:**
+- Verified help output formatting with `grep` and `sed` commands
+- Confirmed multi-engine section appears correctly in help
+- Confirmed examples section includes multi-engine usage patterns
