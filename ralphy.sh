@@ -88,12 +88,12 @@ ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engine names to use
 ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
-declare -A ENGINE_WEIGHTS=()  # Map of engine names to weights (for weighted distribution)
-declare -A ENGINE_AGENT_COUNT=()  # Track number of agents assigned to each engine
-declare -A ENGINE_SUCCESS=()  # Track successful runs per engine
-declare -A ENGINE_FAILURES=()  # Track failed runs per engine
-declare -A ENGINE_COSTS=()  # Track cumulative costs per engine
-declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")
+declare -A ENGINE_WEIGHTS=()  # Weights for weighted distribution
+declare -A ENGINE_AGENT_COUNT=()  # Track number of agents per engine
+declare -A ENGINE_COSTS=()  # Track total cost per engine
+declare -A ENGINE_SUCCESS=()  # Track successful agents per engine
+declare -A ENGINE_FAILURES=()  # Track failed agents per engine
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
 
 # ============================================
 # UTILITY FUNCTIONS
@@ -126,231 +126,22 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
-# Display engine configuration (for multi-engine support)
-display_engines_config() {
-  # Check if ENGINES array is defined and has elements
-  if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 0 ]]; then
-    local engine_list=""
-    local weighted_display=""
+# Get engine for agent using round-robin distribution
+# Args: agent_num (0-based index)
+# Returns: engine name
+get_engine_for_agent() {
+  local agent_num=$1
+  local engine_count=${#ENGINES[@]}
 
-    # Build engine list with weights if available
-    for engine in "${ENGINES[@]}"; do
-      if [[ -n "${ENGINE_WEIGHTS[$engine]:-}" ]] && [[ "${ENGINE_WEIGHTS[$engine]}" != "1" ]]; then
-        if [[ -n "$engine_list" ]]; then
-          engine_list+=", "
-        fi
-        engine_list+="$engine:${ENGINE_WEIGHTS[$engine]}"
-      else
-        if [[ -n "$engine_list" ]]; then
-          engine_list+=", "
-        fi
-        engine_list+="$engine"
-      fi
-    done
-
-    # Display distribution strategy
-    local strategy_display="${ENGINE_DISTRIBUTION:-round-robin}"
-    echo "Engines:        ${CYAN}$strategy_display${RESET} [$engine_list]"
-
-    # Add distribution explanation
-    case "$strategy_display" in
-      round-robin)
-        echo "${DIM}Distribution:   Cycle through engines in order${RESET}"
-        ;;
-      weighted)
-        echo "${DIM}Distribution:   Distribute based on engine weights${RESET}"
-        ;;
-      random)
-        echo "${DIM}Distribution:   Random selection from engine list${RESET}"
-        ;;
-      fill-first)
-        echo "${DIM}Distribution:   Fill each engine before moving to next${RESET}"
-        ;;
-    esac
-  elif [[ -n "$AI_ENGINE" ]]; then
-    # Fall back to single engine display (backward compatibility)
-    local engine_display
-    case "$AI_ENGINE" in
-      opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-      cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-      codex) engine_display="${BLUE}Codex${RESET}" ;;
-      qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-      droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-      *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
-    esac
-    echo "Engine:         $engine_display"
-  fi
-}
-
-# ============================================
-# MULTI-ENGINE CONFIGURATION SERIALIZATION
-# ============================================
-
-# Serialize engine configuration to environment variables for subshell access
-# Bash associative arrays cannot be exported to subshells, so we serialize
-# them to pipe-delimited strings: "key1:value1|key2:value2"
-serialize_engine_config() {
-  log_debug "Serializing engine configuration for subshell export"
-
-  # Serialize ENGINES array to comma-separated string
-  if [[ ${#ENGINES[@]} -gt 0 ]]; then
-    export ENGINES_SERIALIZED
-    ENGINES_SERIALIZED=$(IFS=,; echo "${ENGINES[*]}")
-    log_debug "ENGINES_SERIALIZED=$ENGINES_SERIALIZED"
-  else
-    export ENGINES_SERIALIZED=""
+  # If no engines configured, return default
+  if [[ $engine_count -eq 0 ]]; then
+    echo "$AI_ENGINE"
+    return
   fi
 
-  # Serialize ENGINE_WEIGHTS associative array to pipe-delimited key:value pairs
-  local weights_str=""
-  for engine in "${!ENGINE_WEIGHTS[@]}"; do
-    local weight="${ENGINE_WEIGHTS[$engine]}"
-    if [[ -n "$weights_str" ]]; then
-      weights_str="${weights_str}|${engine}:${weight}"
-    else
-      weights_str="${engine}:${weight}"
-    fi
-  done
-  export ENGINE_WEIGHTS_SERIALIZED="$weights_str"
-  log_debug "ENGINE_WEIGHTS_SERIALIZED=$ENGINE_WEIGHTS_SERIALIZED"
-
-  # Serialize ENGINE_AGENT_COUNT associative array
-  local agent_count_str=""
-  for engine in "${!ENGINE_AGENT_COUNT[@]}"; do
-    local count="${ENGINE_AGENT_COUNT[$engine]}"
-    if [[ -n "$agent_count_str" ]]; then
-      agent_count_str="${agent_count_str}|${engine}:${count}"
-    else
-      agent_count_str="${engine}:${count}"
-    fi
-  done
-  export ENGINE_AGENT_COUNT_SERIALIZED="$agent_count_str"
-  log_debug "ENGINE_AGENT_COUNT_SERIALIZED=$ENGINE_AGENT_COUNT_SERIALIZED"
-
-  # Serialize ENGINE_SUCCESS associative array
-  local success_str=""
-  for engine in "${!ENGINE_SUCCESS[@]}"; do
-    local count="${ENGINE_SUCCESS[$engine]}"
-    if [[ -n "$success_str" ]]; then
-      success_str="${success_str}|${engine}:${count}"
-    else
-      success_str="${engine}:${count}"
-    fi
-  done
-  export ENGINE_SUCCESS_SERIALIZED="$success_str"
-  log_debug "ENGINE_SUCCESS_SERIALIZED=$ENGINE_SUCCESS_SERIALIZED"
-
-  # Serialize ENGINE_FAILURES associative array
-  local failures_str=""
-  for engine in "${!ENGINE_FAILURES[@]}"; do
-    local count="${ENGINE_FAILURES[$engine]}"
-    if [[ -n "$failures_str" ]]; then
-      failures_str="${failures_str}|${engine}:${count}"
-    else
-      failures_str="${engine}:${count}"
-    fi
-  done
-  export ENGINE_FAILURES_SERIALIZED="$failures_str"
-  log_debug "ENGINE_FAILURES_SERIALIZED=$ENGINE_FAILURES_SERIALIZED"
-
-  # Serialize ENGINE_COSTS associative array
-  local costs_str=""
-  for engine in "${!ENGINE_COSTS[@]}"; do
-    local cost="${ENGINE_COSTS[$engine]}"
-    if [[ -n "$costs_str" ]]; then
-      costs_str="${costs_str}|${engine}:${cost}"
-    else
-      costs_str="${engine}:${cost}"
-    fi
-  done
-  export ENGINE_COSTS_SERIALIZED="$costs_str"
-  log_debug "ENGINE_COSTS_SERIALIZED=$ENGINE_COSTS_SERIALIZED"
-
-  # Export distribution strategy and valid engines
-  export ENGINE_DISTRIBUTION
-  export VALID_ENGINES_SERIALIZED
-  VALID_ENGINES_SERIALIZED=$(IFS=,; echo "${VALID_ENGINES[*]}")
-  log_debug "ENGINE_DISTRIBUTION=$ENGINE_DISTRIBUTION"
-}
-
-# Deserialize engine configuration from environment variables in subshell
-# Reconstructs the associative and indexed arrays from the serialized strings
-deserialize_engine_config() {
-  log_debug "Deserializing engine configuration in subshell"
-
-  # Deserialize ENGINES array from comma-separated string
-  if [[ -n "$ENGINES_SERIALIZED" ]]; then
-    IFS=',' read -ra ENGINES <<< "$ENGINES_SERIALIZED"
-    log_debug "Deserialized ENGINES: ${ENGINES[*]}"
-  fi
-
-  # Deserialize ENGINE_WEIGHTS from pipe-delimited key:value pairs
-  if [[ -n "$ENGINE_WEIGHTS_SERIALIZED" ]]; then
-    declare -gA ENGINE_WEIGHTS
-    IFS='|' read -ra weights_pairs <<< "$ENGINE_WEIGHTS_SERIALIZED"
-    for pair in "${weights_pairs[@]}"; do
-      local engine="${pair%%:*}"
-      local weight="${pair##*:}"
-      ENGINE_WEIGHTS["$engine"]="$weight"
-      log_debug "ENGINE_WEIGHTS[$engine]=$weight"
-    done
-  fi
-
-  # Deserialize ENGINE_AGENT_COUNT from pipe-delimited key:value pairs
-  if [[ -n "$ENGINE_AGENT_COUNT_SERIALIZED" ]]; then
-    declare -gA ENGINE_AGENT_COUNT
-    IFS='|' read -ra count_pairs <<< "$ENGINE_AGENT_COUNT_SERIALIZED"
-    for pair in "${count_pairs[@]}"; do
-      local engine="${pair%%:*}"
-      local count="${pair##*:}"
-      ENGINE_AGENT_COUNT["$engine"]="$count"
-      log_debug "ENGINE_AGENT_COUNT[$engine]=$count"
-    done
-  fi
-
-  # Deserialize ENGINE_SUCCESS from pipe-delimited key:value pairs
-  if [[ -n "$ENGINE_SUCCESS_SERIALIZED" ]]; then
-    declare -gA ENGINE_SUCCESS
-    IFS='|' read -ra success_pairs <<< "$ENGINE_SUCCESS_SERIALIZED"
-    for pair in "${success_pairs[@]}"; do
-      local engine="${pair%%:*}"
-      local count="${pair##*:}"
-      ENGINE_SUCCESS["$engine"]="$count"
-      log_debug "ENGINE_SUCCESS[$engine]=$count"
-    done
-  fi
-
-  # Deserialize ENGINE_FAILURES from pipe-delimited key:value pairs
-  if [[ -n "$ENGINE_FAILURES_SERIALIZED" ]]; then
-    declare -gA ENGINE_FAILURES
-    IFS='|' read -ra failures_pairs <<< "$ENGINE_FAILURES_SERIALIZED"
-    for pair in "${failures_pairs[@]}"; do
-      local engine="${pair%%:*}"
-      local count="${pair##*:}"
-      ENGINE_FAILURES["$engine"]="$count"
-      log_debug "ENGINE_FAILURES[$engine]=$count"
-    done
-  fi
-
-  # Deserialize ENGINE_COSTS from pipe-delimited key:value pairs
-  if [[ -n "$ENGINE_COSTS_SERIALIZED" ]]; then
-    declare -gA ENGINE_COSTS
-    IFS='|' read -ra costs_pairs <<< "$ENGINE_COSTS_SERIALIZED"
-    for pair in "${costs_pairs[@]}"; do
-      local engine="${pair%%:*}"
-      local cost="${pair##*:}"
-      ENGINE_COSTS["$engine"]="$cost"
-      log_debug "ENGINE_COSTS[$engine]=$cost"
-    done
-  fi
-
-  # Deserialize VALID_ENGINES array from comma-separated string
-  if [[ -n "$VALID_ENGINES_SERIALIZED" ]]; then
-    IFS=',' read -ra VALID_ENGINES <<< "$VALID_ENGINES_SERIALIZED"
-    log_debug "Deserialized VALID_ENGINES: ${VALID_ENGINES[*]}"
-  fi
-
-  log_debug "Engine configuration deserialization complete"
+  # Round-robin distribution: agent_num % engine_count
+  local engine_index=$((agent_num % engine_count))
+  echo "${ENGINES[$engine_index]}"
 }
 
 # ============================================
@@ -2388,89 +2179,21 @@ Focus only on implementing: $task_name"
 
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-
+  
   local all_tasks=()
-
+  
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")
   done < <(get_all_tasks)
-
+  
   if [[ ${#all_tasks[@]} -eq 0 ]]; then
     log_info "No tasks to run"
     return 2
   fi
-
+  
   local total_tasks=${#all_tasks[@]}
   log_info "Found $total_tasks tasks to process"
-
-  # Handle dry-run mode - show what would be executed
-  if [[ "$DRY_RUN" == true ]]; then
-    echo ""
-    log_info "${BOLD}DRY RUN - Parallel Execution Plan${RESET}"
-    echo ""
-
-    # Display engine configuration if multi-engine is configured
-    if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 1 ]]; then
-      echo "${BOLD}Engine Distribution:${RESET}"
-      display_engines_config
-      echo ""
-
-      # Show task assignment preview (first 10 tasks)
-      echo "${BOLD}Task Assignment Preview (first 10):${RESET}"
-      local preview_count=$((total_tasks < 10 ? total_tasks : 10))
-      for ((i = 0; i < preview_count; i++)); do
-        local task="${all_tasks[$i]}"
-        local agent_num=$((i + 1))
-
-        # Simulate engine assignment based on distribution strategy
-        local assigned_engine=""
-        if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 0 ]]; then
-          local engine_count=${#ENGINES[@]}
-          case "${ENGINE_DISTRIBUTION:-round-robin}" in
-            round-robin)
-              local engine_idx=$((agent_num % engine_count))
-              assigned_engine="${ENGINES[$engine_idx]}"
-              ;;
-            fill-first)
-              local agents_per_engine=$(( (total_tasks + engine_count - 1) / engine_count ))
-              local engine_idx=$(( (agent_num - 1) / agents_per_engine ))
-              [[ $engine_idx -ge $engine_count ]] && engine_idx=$((engine_count - 1))
-              assigned_engine="${ENGINES[$engine_idx]}"
-              ;;
-            random)
-              assigned_engine="${ENGINES[0]}"  # Can't truly simulate random in dry-run
-              ;;
-            weighted)
-              assigned_engine="${ENGINES[0]}"  # Simplified for dry-run preview
-              ;;
-            *)
-              assigned_engine="${ENGINES[0]}"
-              ;;
-          esac
-        else
-          assigned_engine="${AI_ENGINE:-claude}"
-        fi
-
-        echo "${DIM}  Agent $agent_num → ${CYAN}$assigned_engine${RESET}: $task${RESET}"
-      done
-
-      if [[ $total_tasks -gt 10 ]]; then
-        echo "${DIM}  ... and $((total_tasks - 10)) more tasks${RESET}"
-      fi
-      echo ""
-    fi
-
-    echo "${BOLD}Tasks to execute:${RESET}"
-    for ((i = 0; i < total_tasks; i++)); do
-      local task="${all_tasks[$i]}"
-      echo "${DIM}  $((i + 1)). $task${RESET}"
-    done
-    echo ""
-
-    log_info "Dry-run complete - no tasks were executed"
-    return 0
-  fi
   
   # Store original directory for git operations from subshells
   ORIGINAL_DIR=$(pwd)
@@ -3137,10 +2860,19 @@ main() {
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
-  display_engines_config
-  echo "Source:         ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
+  local engine_display
+  case "$AI_ENGINE" in
+    opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
+    cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
+    codex) engine_display="${BLUE}Codex${RESET}" ;;
+    qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
+    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
+    *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
+  esac
+  echo "Engine: $engine_display"
+  echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   if [[ -d "$RALPHY_DIR" ]]; then
-    echo "Config:         ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
+    echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
   fi
 
   local mode_parts=()
