@@ -85,6 +85,12 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine tracking (for parallel execution with multiple engines)
+declare -A ENGINE_AGENT_COUNT=()  # Number of agents per engine
+declare -A ENGINE_SUCCESS=()      # Success count per engine
+declare -A ENGINE_FAILURES=()     # Failure count per engine
+declare -A ENGINE_COSTS=()        # Total cost per engine
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -2746,6 +2752,93 @@ show_summary() {
   fi
   
   echo "${BOLD}============================================${RESET}"
+}
+
+# Print engine summary table (for multi-engine parallel execution)
+print_engine_summary() {
+  # Check if we have any engine data to display
+  local has_data=false
+  for engine in "${!ENGINE_AGENT_COUNT[@]}"; do
+    has_data=true
+    break
+  done
+
+  if [[ "$has_data" != true ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "${BOLD}>>> Engine Summary${RESET}"
+  echo ""
+
+  # Calculate column widths
+  local engine_width=10
+  local agents_width=8
+  local success_width=9
+  local failed_width=8
+  local cost_width=10
+
+  # Print header
+  printf "%-${engine_width}s  %-${agents_width}s  %-${success_width}s  %-${failed_width}s  %-${cost_width}s\n" \
+    "Engine" "Agents" "Success" "Failed" "Cost"
+
+  # Print separator
+  printf "%s\n" "$(printf '%.0s-' {1..60})"
+
+  # Initialize totals
+  local total_agents=0
+  local total_success=0
+  local total_failed=0
+  local total_cost=0
+
+  # Sort engines alphabetically for consistent display
+  local sorted_engines=()
+  while IFS= read -r engine; do
+    sorted_engines+=("$engine")
+  done < <(printf '%s\n' "${!ENGINE_AGENT_COUNT[@]}" | sort)
+
+  # Print each engine's stats
+  for engine in "${sorted_engines[@]}"; do
+    local agents="${ENGINE_AGENT_COUNT[$engine]:-0}"
+    local success="${ENGINE_SUCCESS[$engine]:-0}"
+    local failed="${ENGINE_FAILURES[$engine]:-0}"
+    local cost="${ENGINE_COSTS[$engine]:-0}"
+
+    # Format cost with proper decimal places
+    if command -v bc &>/dev/null && [[ "$cost" != "0" ]]; then
+      cost=$(printf "%.4f" "$cost" 2>/dev/null || echo "$cost")
+    fi
+
+    printf "%-${engine_width}s  %-${agents_width}s  %-${success_width}s  %-${failed_width}s  \$%-${cost_width}s\n" \
+      "$engine" "$agents" "$success" "$failed" "$cost"
+
+    # Update totals
+    total_agents=$((total_agents + agents))
+    total_success=$((total_success + success))
+    total_failed=$((total_failed + failed))
+
+    # Add to total cost (handle decimal arithmetic with bc if available)
+    if command -v bc &>/dev/null; then
+      total_cost=$(echo "$total_cost + $cost" | bc 2>/dev/null || echo "$total_cost")
+    else
+      # Fallback: simple addition (loses precision)
+      total_cost=$(awk "BEGIN {print $total_cost + $cost}" 2>/dev/null || echo "$total_cost")
+    fi
+  done
+
+  # Print separator
+  printf "%s\n" "$(printf '%.0s-' {1..60})"
+
+  # Format total cost
+  if command -v bc &>/dev/null && [[ "$total_cost" != "0" ]]; then
+    total_cost=$(printf "%.4f" "$total_cost" 2>/dev/null || echo "$total_cost")
+  fi
+
+  # Print totals row
+  printf "${BOLD}%-${engine_width}s  %-${agents_width}s  %-${success_width}s  %-${failed_width}s  \$%-${cost_width}s${RESET}\n" \
+    "TOTAL" "$total_agents" "$total_success" "$total_failed" "$total_cost"
+
+  echo ""
 }
 
 # ============================================
