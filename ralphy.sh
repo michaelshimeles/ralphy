@@ -86,14 +86,14 @@ ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
 # Multi-engine configuration
-declare -a ENGINES=()  # Array of engines to use for parallel tasks
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
-declare -A ENGINE_WEIGHTS=()  # Associative array mapping engine name to weight
-declare -A ENGINE_AGENT_COUNT=()  # Count of agents assigned to each engine
+declare -a ENGINES=()  # Array of engines to use in rotation
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, or fill-first
+declare -A ENGINE_WEIGHTS=()  # Weight/priority for each engine
+declare -A ENGINE_AGENT_COUNT=()  # Number of agents assigned to each engine
 declare -A ENGINE_COSTS=()  # Total cost per engine
 declare -A ENGINE_SUCCESS=()  # Success count per engine
 declare -A ENGINE_FAILURES=()  # Failure count per engine
-declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")
 
 # ============================================
 # UTILITY FUNCTIONS
@@ -676,26 +676,6 @@ show_version() {
 # ARGUMENT PARSING
 # ============================================
 
-# Helper function to append an engine to ENGINES array with deduplication
-# For --cursor/--agent alias, both add "cursor" to avoid duplicates
-append_engine() {
-  local engine="$1"
-
-  # Check if engine already exists in ENGINES array
-  local exists=false
-  for e in "${ENGINES[@]}"; do
-    if [[ "$e" == "$engine" ]]; then
-      exists=true
-      break
-    fi
-  done
-
-  # Only append if not already present
-  if [[ "$exists" == false ]]; then
-    ENGINES+=("$engine")
-  fi
-}
-
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -713,11 +693,11 @@ parse_args() {
         shift
         ;;
       --opencode)
-        append_engine "opencode"
+        AI_ENGINE="opencode"
         shift
         ;;
       --claude)
-        append_engine "claude"
+        AI_ENGINE="claude"
         shift
         ;;
       --sonnet)
@@ -725,20 +705,55 @@ parse_args() {
         shift
         ;;
       --cursor|--agent)
-        append_engine "cursor"
+        AI_ENGINE="cursor"
         shift
         ;;
       --codex)
-        append_engine "codex"
+        AI_ENGINE="codex"
         shift
         ;;
       --qwen)
-        append_engine "qwen"
+        AI_ENGINE="qwen"
         shift
         ;;
       --droid)
-        append_engine "droid"
+        AI_ENGINE="droid"
         shift
+        ;;
+      --engines)
+        [[ -z "${2:-}" ]] && { log_error "--engines requires an argument"; exit 1; }
+        local engines_arg="$2"
+
+        # Split comma-separated list into ENGINES array
+        IFS=',' read -ra ENGINES <<< "$engines_arg"
+
+        # Parse each engine for weight syntax (engine:weight)
+        for i in "${!ENGINES[@]}"; do
+          local engine_spec="${ENGINES[$i]}"
+
+          if [[ "$engine_spec" =~ ^([a-zA-Z0-9_-]+):([0-9]+)$ ]]; then
+            local engine="${BASH_REMATCH[1]}"
+            local weight="${BASH_REMATCH[2]}"
+
+            # Validate weight is a positive integer
+            if [[ "$weight" -le 0 ]]; then
+              log_error "Engine weight must be a positive integer: $engine_spec"
+              exit 1
+            fi
+
+            # Store engine and weight
+            ENGINES[$i]="$engine"
+            ENGINE_WEIGHTS["$engine"]="$weight"
+          elif [[ "$engine_spec" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            # Engine without weight, default weight is 1
+            ENGINE_WEIGHTS["$engine_spec"]=1
+          else
+            log_error "Invalid engine specification: $engine_spec"
+            exit 1
+          fi
+        done
+
+        shift 2
         ;;
       --dry-run)
         DRY_RUN=true
@@ -762,6 +777,22 @@ parse_args() {
         ;;
       --max-parallel)
         MAX_PARALLEL="${2:-3}"
+        shift 2
+        ;;
+      --engine-distribution)
+        case "${2:-}" in
+          round-robin|weighted|random|fill-first)
+            ENGINE_DISTRIBUTION="$2"
+            ;;
+          "")
+            log_error "--engine-distribution requires an argument"
+            exit 1
+            ;;
+          *)
+            log_error "Invalid engine distribution: $2. Must be one of: round-robin, weighted, random, fill-first"
+            exit 1
+            ;;
+        esac
         shift 2
         ;;
       --branch-per-task)
@@ -844,6 +875,17 @@ parse_args() {
         ;;
     esac
   done
+
+  # Backward compatibility: maintain AI_ENGINE for single-engine usage
+  local num_engines="${#ENGINES[@]}"
+  if [[ "$num_engines" -eq 1 ]]; then
+    # If exactly one engine specified, set AI_ENGINE for backward compatibility
+    AI_ENGINE="${ENGINES[0]}"
+  elif [[ "$num_engines" -eq 0 ]]; then
+    # If no engines specified, populate ENGINES with default AI_ENGINE
+    ENGINES=("$AI_ENGINE")
+    ENGINE_WEIGHTS["$AI_ENGINE"]=1
+  fi
 }
 
 # ============================================
