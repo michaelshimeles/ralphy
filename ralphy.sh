@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine parallel execution
+declare -a ENGINES=()  # List of engines to use for parallel tasks
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Weights for weighted distribution (engine_name => weight)
+declare -A ENGINE_AGENT_COUNT=()  # Track number of agents per engine
+declare -A ENGINE_COSTS=()  # Track costs per engine
+declare -A ENGINE_SUCCESS=()  # Track successful tasks per engine
+declare -A ENGINE_FAILURES=()  # Track failed tasks per engine
+declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)  # Supported engines
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -114,6 +124,73 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Remove duplicate engine names and sum their weights
+# Modifies ENGINES array and ENGINE_WEIGHTS associative array in place
+# Issues a warning when duplicates are found
+deduplicate_engines() {
+  # Return early if no engines to process
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Build associative array to track unique engines and summed weights
+  declare -A unique_engines
+  declare -A summed_weights
+  declare -A duplicate_details  # Track individual weights for warning message
+
+  # Process each engine in order
+  for engine in "${ENGINES[@]}"; do
+    if [[ -n "${unique_engines[$engine]:-}" ]]; then
+      # Duplicate found - sum the weights
+      local old_weight="${ENGINE_WEIGHTS[$engine]:-1}"
+      local existing_weight="${summed_weights[$engine]:-0}"
+      summed_weights[$engine]=$((existing_weight + old_weight))
+
+      # Track details for warning
+      if [[ -z "${duplicate_details[$engine]:-}" ]]; then
+        duplicate_details[$engine]="${ENGINE_WEIGHTS[$engine]:-1}"
+      fi
+      duplicate_details[$engine]="${duplicate_details[$engine]} + ${old_weight}"
+    else
+      # First occurrence - add to unique list
+      unique_engines[$engine]=1
+      summed_weights[$engine]="${ENGINE_WEIGHTS[$engine]:-1}"
+    fi
+  done
+
+  # Check if we found any duplicates
+  local found_duplicates=false
+  for engine in "${!duplicate_details[@]}"; do
+    found_duplicates=true
+    log_warn "Duplicate engine '${engine}' found. Summed weights: ${duplicate_details[$engine]} = ${summed_weights[$engine]}"
+  done
+
+  # If duplicates were found, rebuild the arrays
+  if [[ "$found_duplicates" == true ]]; then
+    # Clear and rebuild ENGINES array with unique values (preserving first occurrence order)
+    local -a new_engines=()
+    for engine in "${ENGINES[@]}"; do
+      # Only add if not already in new_engines
+      local already_added=false
+      for added_engine in "${new_engines[@]}"; do
+        if [[ "$added_engine" == "$engine" ]]; then
+          already_added=true
+          break
+        fi
+      done
+      if [[ "$already_added" == false ]]; then
+        new_engines+=("$engine")
+      fi
+    done
+    ENGINES=("${new_engines[@]}")
+
+    # Update ENGINE_WEIGHTS with summed values
+    for engine in "${!summed_weights[@]}"; do
+      ENGINE_WEIGHTS[$engine]="${summed_weights[$engine]}"
+    done
+  fi
 }
 
 # ============================================
