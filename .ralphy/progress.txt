@@ -1,0 +1,16 @@
+Created examples/multi-engine-weighted.yaml
+
+This file demonstrates weighted distribution configuration for multi-engine parallel execution.
+
+Key features:
+- Shows how to configure weighted task distribution across engines
+- Includes comprehensive documentation and usage examples
+- Demonstrates weight ratios (claude:3, cursor:2, opencode:2)
+- Explains how weighted distribution works with task cycling
+- Provides alternative weight configuration examples
+- Includes 14 sample tasks organized in 3 parallel groups
+
+The example shows a practical use case for weighted distribution where you want
+Claude to handle ~43% of tasks (weight 3) and Cursor/OpenCode to handle ~29% each (weight 2).
+
+File location: examples/multi-engine-weighted.yaml

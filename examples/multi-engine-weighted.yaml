@@ -1,0 +1,125 @@
+# Multi-Engine Weighted Distribution Example
+#
+# This example demonstrates weighted task distribution across multiple AI engines.
+# Use weights to control how many tasks each engine receives - higher weights
+# mean more tasks assigned to that engine.
+#
+# Usage:
+#   ./ralphy.sh --yaml examples/multi-engine-weighted.yaml --parallel --engine-distribution weighted
+#
+# Weight ratios:
+#   - Claude (weight 3): receives 3/7 of tasks (~43%)
+#   - Cursor (weight 2): receives 2/7 of tasks (~29%)
+#   - OpenCode (weight 2): receives 2/7 of tasks (~29%)
+#
+# How it works:
+# With 7 total weight units, engines are expanded into a pool:
+# [claude, claude, claude, cursor, cursor, opencode, opencode]
+# Tasks cycle through this expanded pool.
+
+# Parallel execution configuration
+parallel:
+  # Maximum concurrent agents
+  max_concurrent: 5
+
+  # Distribution strategy: weighted, round-robin, random, or fill-first
+  distribution: weighted
+
+  # Engine configuration with weights
+  engines:
+    - name: claude
+      weight: 3  # Claude gets 3x the tasks
+
+    - name: cursor
+      weight: 2  # Cursor gets 2x the tasks
+
+    - name: opencode
+      weight: 2  # OpenCode gets 2x the tasks
+
+# Task list
+tasks:
+  # Group 1: Foundation - Run in parallel
+  - title: Set up database schema
+    completed: false
+    parallel_group: 1
+
+  - title: Create API client library
+    completed: false
+    parallel_group: 1
+
+  - title: Implement authentication middleware
+    completed: false
+    parallel_group: 1
+
+  - title: Set up logging infrastructure
+    completed: false
+    parallel_group: 1
+
+  - title: Configure error handling
+    completed: false
+    parallel_group: 1
+
+  # Group 2: Core Features - Run after group 1
+  - title: Implement user registration endpoint
+    completed: false
+    parallel_group: 2
+
+  - title: Implement user login endpoint
+    completed: false
+    parallel_group: 2
+
+  - title: Create user profile management
+    completed: false
+    parallel_group: 2
+
+  - title: Implement password reset flow
+    completed: false
+    parallel_group: 2
+
+  - title: Add email verification
+    completed: false
+    parallel_group: 2
+
+  # Group 3: Advanced Features - Run after group 2
+  - title: Implement rate limiting
+    completed: false
+    parallel_group: 3
+
+  - title: Add caching layer
+    completed: false
+    parallel_group: 3
+
+  - title: Create admin dashboard
+    completed: false
+    parallel_group: 3
+
+  - title: Implement analytics tracking
+    completed: false
+    parallel_group: 3
+
+# Alternative weighted configurations:
+#
+# Heavy bias toward Claude:
+#   engines:
+#     - name: claude
+#       weight: 5
+#     - name: cursor
+#       weight: 1
+#     - name: opencode
+#       weight: 1
+#
+# Equal distribution (same as round-robin):
+#   engines:
+#     - name: claude
+#       weight: 1
+#     - name: cursor
+#       weight: 1
+#     - name: opencode
+#       weight: 1
+#
+# Extreme bias (90% claude, 10% others):
+#   engines:
+#     - name: claude
+#       weight: 9
+#     - name: cursor
+#       weight: 1
