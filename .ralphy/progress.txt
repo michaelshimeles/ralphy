@@ -1,52 +1,36 @@
-## Progress Update - Agent 16
+## Task: Parse engine from status file in monitoring loop using grep for engine= line
 
-### Task: Extract inline status monitoring into display_agent_status() function
+### Implementation Summary
 
-**Date:** 2026-01-19
+Modified the status file format and monitoring loop to support engine tracking:
 
-**Changes Made:**
+1. **Status File Format Enhancement**
+   - Extended status file format to include engine information on a second line
+   - Format: Line 1 contains status (waiting, setting up, running, done, failed)
+   - Format: Line 2 contains `engine=<engine_name>`
 
-1. **Created display_agent_status() function** (ralphy.sh:2152-2214)
-   - Extracted inline status monitoring logic from lines 2337-2393
-   - Function accepts 4 parameters:
-     - pids: array reference to process IDs
-     - status_file_paths: array reference to status file paths
-     - batch_size: number of agents in the batch
-     - start_time: timestamp when monitoring started
-   - Monitors agent status with spinner animation
-   - Displays counts of agents in different states (setup, running, done, failed)
-   - Exits when all agents complete
+2. **Status File Writes Updated**
+   - Added `echo "engine=$AI_ENGINE" >> "$status_file"` after all status writes in run_parallel_agent()
+   - Locations updated:
+     - Initial "setting up" status (line 1962)
+     - Worktree creation failure (line 1981)
+     - "running" status (line 1988)
+     - No commits failure (line 2120)
+     - Success "done" status (line 2142)
+     - Final "failed" status (line 2151)
+     - Initial "waiting" status in monitoring loop (line 2265)
 
-2. **Replaced inline code with function call** (ralphy.sh:2337-2338)
-   - Removed 57 lines of duplicate monitoring code
-   - Replaced with clean 2-line function call
-   - Maintains identical functionality
+3. **Monitoring Loop Enhancement**
+   - Modified status parsing to read only the first line: `head -n 1 "$status_file"`
+   - Added engine parsing using grep: `grep "^engine=" "$status_file" | cut -d= -f2`
+   - Location: ralphy.sh lines 2295-2296
 
-3. **Created comprehensive test suite** (test_display_agent_status.sh)
-   - Tests function definition exists
-   - Validates bash syntax
-   - Verifies correct parameters
-   - Confirms function is called properly
-   - Validates inline code removal
-   - Tests entire script syntax
+### Technical Details
 
-**Files Modified:**
-- ralphy.sh (function extracted and inline code replaced)
-- test_display_agent_status.sh (new test file)
-- .ralphy/progress.txt (this file)
+The engine variable is now available in the monitoring loop for each agent, enabling future features like:
+- Displaying engine name alongside agent status
+- Color-coding status by engine
+- Tracking per-engine metrics
 
-**Test Results:**
-All 6 tests passed successfully:
-✓ Function definition found
-✓ Function syntax is valid
-✓ Function has all required parameters
-✓ Function is called correctly
-✓ Inline monitoring code successfully removed
-✓ Script syntax is valid
-
-**Benefits:**
-- Reduced code duplication
-- Improved maintainability
-- Cleaner code structure
-- Reusable function for future parallel monitoring needs
-- Easier to modify status display logic in one place
+### Files Modified
+- ralphy.sh: Updated status file format and monitoring loop parsing
