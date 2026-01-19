@@ -369,6 +369,109 @@ deserialize_engine_config() {
 }
 
 # ============================================
+# MULTI-ENGINE FUNCTIONS
+# ============================================
+
+# Expand engines array based on weights for weighted distribution
+# This creates an array where each engine appears N times based on its weight
+expand_engines_by_weight() {
+  EXPANDED_ENGINES=()
+
+  local engine_count=${#ENGINES[@]}
+  if [[ $engine_count -eq 0 ]]; then
+    return
+  fi
+
+  # If no weights defined or distribution is not weighted, just use ENGINES as-is
+  if [[ "$ENGINE_DISTRIBUTION" != "weighted" ]] || [[ ${#ENGINE_WEIGHTS[@]} -eq 0 ]]; then
+    EXPANDED_ENGINES=("${ENGINES[@]}")
+    return
+  fi
+
+  # Expand each engine by its weight
+  for engine in "${ENGINES[@]}"; do
+    local weight=${ENGINE_WEIGHTS[$engine]:-1}  # Default weight is 1
+
+    # Add engine 'weight' times to the expanded array
+    for ((i=0; i<weight; i++)); do
+      EXPANDED_ENGINES+=("$engine")
+    done
+  done
+
+  log_debug "Expanded engines array (${#EXPANDED_ENGINES[@]} slots): ${EXPANDED_ENGINES[*]}"
+}
+
+# Get engine for a specific agent number based on distribution strategy
+# Usage: get_engine_for_agent <agent_num>
+# Returns: engine name (e.g., "claude", "opencode")
+get_engine_for_agent() {
+  local agent_num=$1
+  local engine_count=${#ENGINES[@]}
+
+  # If no engines configured, return default
+  if [[ $engine_count -eq 0 ]]; then
+    echo "$AI_ENGINE"
+    return
+  fi
+
+  # If only one engine, always return it
+  if [[ $engine_count -eq 1 ]]; then
+    echo "${ENGINES[0]}"
+    return
+  fi
+
+  # Handle different distribution strategies
+  case "$ENGINE_DISTRIBUTION" in
+    "round-robin")
+      # Simple modulo distribution
+      local index=$((agent_num % engine_count))
+      echo "${ENGINES[$index]}"
+      ;;
+
+    "weighted")
+      # Use expanded array for weighted distribution
+      # First ensure the expanded array is populated
+      if [[ ${#EXPANDED_ENGINES[@]} -eq 0 ]]; then
+        expand_engines_by_weight
+      fi
+
+      # If expansion failed, fall back to round-robin
+      if [[ ${#EXPANDED_ENGINES[@]} -eq 0 ]]; then
+        local index=$((agent_num % engine_count))
+        echo "${ENGINES[$index]}"
+        return
+      fi
+
+      # Cycle through expanded array
+      local expanded_count=${#EXPANDED_ENGINES[@]}
+      local index=$((agent_num % expanded_count))
+      echo "${EXPANDED_ENGINES[$index]}"
+      ;;
+
+    "random")
+      # Random selection
+      local index=$((RANDOM % engine_count))
+      echo "${ENGINES[$index]}"
+      ;;
+
+    "fill-first")
+      # Fill each engine before moving to next
+      # This requires knowing total number of agents, which we don't have here
+      # For now, fall back to round-robin
+      # TODO: Implement when total agent count is available
+      local index=$((agent_num % engine_count))
+      echo "${ENGINES[$index]}"
+      ;;
+
+    *)
+      # Default to round-robin
+      local index=$((agent_num % engine_count))
+      echo "${ENGINES[$index]}"
+      ;;
+  esac
+}
+
+# ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
 

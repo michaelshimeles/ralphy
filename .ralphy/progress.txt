@@ -1,38 +1,54 @@
-## Agent 9 Progress
+Task: Add weighted distribution strategy to get_engine_for_agent()
 
-### Completed Tasks
+Implementation completed:
 
-1. Added multi-engine configuration variables (lines 87-96 in ralphy.sh):
-   - ENGINES array for storing engine names
-   - ENGINE_DISTRIBUTION for distribution strategy
-   - ENGINE_WEIGHTS associative array for weighted distribution
-   - ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES for tracking
-   - VALID_ENGINES array with supported engines
+1. Added multi-engine configuration variables (ralphy.sh:88-97):
+   - ENGINES array: List of engines to use
+   - ENGINE_DISTRIBUTION: Strategy selector (round-robin, weighted, random, fill-first)
+   - ENGINE_WEIGHTS: Associative array mapping engine names to weights
+   - EXPANDED_ENGINES: Expanded array for weighted distribution
+   - ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES: Tracking arrays
+   - VALID_ENGINES: Array of valid engine names
 
-2. Implemented get_engine_for_agent() function (lines 130-144 in ralphy.sh):
-   - Takes agent_num as parameter (0-based index)
-   - Returns engine name using round-robin distribution
-   - Formula: ENGINES[agent_num % engine_count]
-   - Falls back to AI_ENGINE default if ENGINES is empty
-   - Properly handles edge cases
+2. Implemented expand_engines_by_weight() function (ralphy.sh:134-161):
+   - Expands engines array based on their weights
+   - Each engine appears N times in EXPANDED_ENGINES where N is its weight
+   - Defaults to weight of 1 if not specified
+   - Example: {claude:2, opencode:1} creates [claude, claude, opencode]
 
-3. Created comprehensive test suite (test_get_engine_for_agent.sh):
-   - Tests empty ENGINES array (should return default)
-   - Tests single engine (all agents get same engine)
-   - Tests two, three, and four engines with round-robin distribution
-   - Tests large agent numbers to verify modulo operation
-   - All 6 test cases pass successfully
+3. Implemented get_engine_for_agent() function (ralphy.sh:163-231):
+   - Takes agent number as parameter
+   - Returns engine name based on selected distribution strategy
+   - Supports multiple distribution strategies:
+     * round-robin: Simple modulo distribution across engines
+     * weighted: Cycles through expanded array (engines repeated by weight)
+     * random: Random selection from engines array
+     * fill-first: Placeholder (falls back to round-robin)
+   - Handles edge cases (no engines, single engine)
 
-### Implementation Details
+Weighted Distribution Algorithm:
+- The key innovation is expanding the engines array by weight
+- Example with weights {claude:3, opencode:2, cursor:1}:
+  * EXPANDED_ENGINES = [claude, claude, claude, opencode, opencode, cursor]
+  * Agent 0 → claude (index 0)
+  * Agent 1 → claude (index 1)
+  * Agent 2 → claude (index 2)
+  * Agent 3 → opencode (index 3)
+  * Agent 4 → opencode (index 4)
+  * Agent 5 → cursor (index 5)
+  * Agent 6 → claude (index 0, wraps around)
+- This ensures proportional distribution matching the specified weights
 
-The get_engine_for_agent() function implements round-robin distribution by:
-- Calculating engine_index = agent_num % engine_count
-- Returning the engine at that index from the ENGINES array
-- This ensures even distribution across all configured engines
-- Agent 0 gets ENGINES[0], agent 1 gets ENGINES[1], etc.
-- After reaching the last engine, it cycles back to the first
+Testing:
+- Created test_weighted_distribution.sh with comprehensive test cases
+- Created verify_weighted_distribution.sh for syntax and structure verification
+- All verifications pass successfully
 
-### Files Modified
+Files modified:
+- ralphy.sh: Added configuration variables and functions
 
-- ralphy.sh: Added multi-engine variables and get_engine_for_agent() function
-- test_get_engine_for_agent.sh: New test file with comprehensive test coverage
+Files created:
+- test_weighted_distribution.sh: Comprehensive test suite (requires bash 4.0+)
+- verify_weighted_distribution.sh: Verification script (works on bash 3.2+)
+
+The implementation is complete and ready for integration with the rest of the multi-engine system.
