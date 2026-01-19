@@ -87,7 +87,7 @@ ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engines to use in rotation
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, or fill-first
+ENGINE_DISTRIBUTION=""  # Distribution pattern (e.g., "claude:2,opencode:1")
 declare -A ENGINE_WEIGHTS=()  # Weight/priority for each engine
 declare -A ENGINE_AGENT_COUNT=()  # Number of agents assigned to each engine
 declare -A ENGINE_COSTS=()  # Total cost per engine
@@ -124,6 +124,77 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Validate engines: check they're in VALID_ENGINES and CLI commands exist
+validate_engines() {
+  local -a valid_engines_list=()
+  local -a invalid_engines=()
+  local -a missing_cli_engines=()
+
+  # Map of engine names to their CLI commands
+  declare -A engine_cli_map=(
+    ["claude"]="claude"
+    ["opencode"]="opencode"
+    ["cursor"]="agent"
+    ["codex"]="codex"
+    ["qwen"]="qwen"
+    ["droid"]="droid"
+  )
+
+  # Check each engine in ENGINES
+  for engine in "${ENGINES[@]}"; do
+    # Check if engine is in VALID_ENGINES
+    local is_valid=false
+    for valid_engine in "${VALID_ENGINES[@]}"; do
+      if [[ "$engine" == "$valid_engine" ]]; then
+        is_valid=true
+        break
+      fi
+    done
+
+    if [[ "$is_valid" == false ]]; then
+      invalid_engines+=("$engine")
+      continue
+    fi
+
+    # Check if CLI command exists
+    local cli_cmd="${engine_cli_map[$engine]}"
+    if ! command -v "$cli_cmd" &>/dev/null; then
+      missing_cli_engines+=("$engine")
+      log_warn "Engine '$engine' selected but CLI command '$cli_cmd' not found in PATH"
+    else
+      valid_engines_list+=("$engine")
+    fi
+  done
+
+  # Report invalid engines
+  if [[ ${#invalid_engines[@]} -gt 0 ]]; then
+    log_error "Invalid engine(s): ${invalid_engines[*]}"
+    log_error "Valid engines are: ${VALID_ENGINES[*]}"
+    return 1
+  fi
+
+  # Warn about missing CLI commands
+  if [[ ${#missing_cli_engines[@]} -gt 0 ]]; then
+    log_warn "The following engines are unavailable due to missing CLI commands:"
+    for engine in "${missing_cli_engines[@]}"; do
+      local cli_cmd="${engine_cli_map[$engine]}"
+      log_warn "  - $engine: '$cli_cmd' not found (install hint: check engine documentation)"
+    done
+  fi
+
+  # Filter ENGINES to only available ones
+  if [[ ${#valid_engines_list[@]} -eq 0 ]]; then
+    log_error "No valid engines available. Please install at least one engine CLI."
+    return 1
+  fi
+
+  # Update ENGINES array with only valid engines
+  ENGINES=("${valid_engines_list[@]}")
+
+  log_debug "Validated engines: ${ENGINES[*]}"
+  return 0
 }
 
 # ============================================
@@ -720,41 +791,6 @@ parse_args() {
         AI_ENGINE="droid"
         shift
         ;;
-      --engines)
-        [[ -z "${2:-}" ]] && { log_error "--engines requires an argument"; exit 1; }
-        local engines_arg="$2"
-
-        # Split comma-separated list into ENGINES array
-        IFS=',' read -ra ENGINES <<< "$engines_arg"
-
-        # Parse each engine for weight syntax (engine:weight)
-        for i in "${!ENGINES[@]}"; do
-          local engine_spec="${ENGINES[$i]}"
-
-          if [[ "$engine_spec" =~ ^([a-zA-Z0-9_-]+):([0-9]+)$ ]]; then
-            local engine="${BASH_REMATCH[1]}"
-            local weight="${BASH_REMATCH[2]}"
-
-            # Validate weight is a positive integer
-            if [[ "$weight" -le 0 ]]; then
-              log_error "Engine weight must be a positive integer: $engine_spec"
-              exit 1
-            fi
-
-            # Store engine and weight
-            ENGINES[$i]="$engine"
-            ENGINE_WEIGHTS["$engine"]="$weight"
-          elif [[ "$engine_spec" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            # Engine without weight, default weight is 1
-            ENGINE_WEIGHTS["$engine_spec"]=1
-          else
-            log_error "Invalid engine specification: $engine_spec"
-            exit 1
-          fi
-        done
-
-        shift 2
-        ;;
       --dry-run)
         DRY_RUN=true
         shift
@@ -777,22 +813,6 @@ parse_args() {
         ;;
       --max-parallel)
         MAX_PARALLEL="${2:-3}"
-        shift 2
-        ;;
-      --engine-distribution)
-        case "${2:-}" in
-          round-robin|weighted|random|fill-first)
-            ENGINE_DISTRIBUTION="$2"
-            ;;
-          "")
-            log_error "--engine-distribution requires an argument"
-            exit 1
-            ;;
-          *)
-            log_error "Invalid engine distribution: $2. Must be one of: round-robin, weighted, random, fill-first"
-            exit 1
-            ;;
-        esac
         shift 2
         ;;
       --branch-per-task)
@@ -875,17 +895,6 @@ parse_args() {
         ;;
     esac
   done
-
-  # Backward compatibility: maintain AI_ENGINE for single-engine usage
-  local num_engines="${#ENGINES[@]}"
-  if [[ "$num_engines" -eq 1 ]]; then
-    # If exactly one engine specified, set AI_ENGINE for backward compatibility
-    AI_ENGINE="${ENGINES[0]}"
-  elif [[ "$num_engines" -eq 0 ]]; then
-    # If no engines specified, populate ENGINES with default AI_ENGINE
-    ENGINES=("$AI_ENGINE")
-    ENGINE_WEIGHTS["$AI_ENGINE"]=1
-  fi
 }
 
 # ============================================
