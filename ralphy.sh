@@ -523,8 +523,7 @@ run_brownfield_task() {
         -p "$prompt" 2>&1 | tee "$output_file"
       ;;
     opencode)
-      opencode --output-format stream-json \
-        --approval-mode full-auto \
+      opencode run --agent build \
         "$prompt" 2>&1 | tee "$output_file"
       ;;
     cursor)
@@ -1478,9 +1477,8 @@ run_ai_command() {
   
   case "$AI_ENGINE" in
     opencode)
-      # OpenCode: use 'run' command with JSON format and permissive settings
-      OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
-        --format json \
+      # OpenCode: use 'run' command with JSON format and build agent for full permissions
+      opencode run --agent build --format json \
         "$prompt" > "$output_file" 2>&1 &
       ;;
     cursor)
@@ -2013,8 +2011,7 @@ Focus only on implementing: $task_name"
       opencode)
         (
           cd "$worktree_dir"
-          OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
-            --format json \
+          opencode run --agent build --format json \
             "$prompt"
         ) > "$tmpfile" 2>>"$log_file"
         ;;
@@ -2610,8 +2607,7 @@ Be careful to preserve functionality from BOTH branches. The goal is to integrat
           
           case "$AI_ENGINE" in
             opencode)
-              OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
-                --format json \
+              opencode run --agent build --format json \
                 "$resolve_prompt" > "$resolve_tmpfile" 2>&1
               ;;
             cursor)
