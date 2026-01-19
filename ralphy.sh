@@ -85,6 +85,15 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Engine-specific metrics tracking (associative arrays)
+declare -A ENGINE_AGENT_COUNT=()   # Total agents per engine
+declare -A ENGINE_SUCCESS=()       # Success count per engine
+declare -A ENGINE_FAILURES=()      # Failure count per engine
+declare -A ENGINE_COSTS=()         # Total cost per engine
+declare -A ENGINE_TOKENS_IN=()     # Total input tokens per engine
+declare -A ENGINE_TOKENS_OUT=()    # Total output tokens per engine
+declare -A ENGINE_DURATION_MS=()   # Total duration per engine (for engines that report it)
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -1680,12 +1689,80 @@ check_for_errors() {
 calculate_cost() {
   local input=$1
   local output=$2
-  
+
   if command -v bc &>/dev/null; then
     echo "scale=4; ($input * 0.000003) + ($output * 0.000015)" | bc
   else
     echo "N/A"
   fi
+}
+
+# Record agent result and aggregate metrics by engine
+# Usage: record_agent_result <engine> <cost> <tokens_in> <tokens_out> <duration_ms> <success>
+# Arguments:
+#   engine: Name of the engine that executed (e.g., "claude", "cursor", "opencode")
+#   cost: Cost of the execution (can be actual or estimated)
+#   tokens_in: Input tokens consumed
+#   tokens_out: Output tokens generated
+#   duration_ms: Execution duration in milliseconds (optional, use 0 if not available)
+#   success: 1 for success, 0 for failure
+record_agent_result() {
+  local engine="$1"
+  local cost="$2"
+  local tokens_in="$3"
+  local tokens_out="$4"
+  local duration_ms="$5"
+  local success="$6"
+
+  # Validate parameters
+  if [[ -z "$engine" ]]; then
+    log_error "record_agent_result: engine parameter is required"
+    return 1
+  fi
+
+  # Initialize engine metrics if not already set
+  if [[ -z "${ENGINE_AGENT_COUNT[$engine]}" ]]; then
+    ENGINE_AGENT_COUNT[$engine]=0
+    ENGINE_SUCCESS[$engine]=0
+    ENGINE_FAILURES[$engine]=0
+    ENGINE_COSTS[$engine]="0"
+    ENGINE_TOKENS_IN[$engine]=0
+    ENGINE_TOKENS_OUT[$engine]=0
+    ENGINE_DURATION_MS[$engine]=0
+  fi
+
+  # Increment agent count
+  ENGINE_AGENT_COUNT[$engine]=$((ENGINE_AGENT_COUNT[$engine] + 1))
+
+  # Track success/failure
+  if [[ "$success" == "1" ]]; then
+    ENGINE_SUCCESS[$engine]=$((ENGINE_SUCCESS[$engine] + 1))
+  else
+    ENGINE_FAILURES[$engine]=$((ENGINE_FAILURES[$engine] + 1))
+  fi
+
+  # Aggregate tokens
+  ENGINE_TOKENS_IN[$engine]=$((ENGINE_TOKENS_IN[$engine] + tokens_in))
+  ENGINE_TOKENS_OUT[$engine]=$((ENGINE_TOKENS_OUT[$engine] + tokens_out))
+
+  # Aggregate duration (if provided)
+  if [[ -n "$duration_ms" && "$duration_ms" != "0" ]]; then
+    ENGINE_DURATION_MS[$engine]=$((ENGINE_DURATION_MS[$engine] + duration_ms))
+  fi
+
+  # Aggregate cost using bc if available
+  if [[ -n "$cost" && "$cost" != "N/A" && "$cost" != "0" ]]; then
+    if command -v bc &>/dev/null; then
+      local current_cost="${ENGINE_COSTS[$engine]}"
+      ENGINE_COSTS[$engine]=$(echo "scale=4; $current_cost + $cost" | bc)
+    else
+      # Fallback: attempt integer arithmetic (will lose precision)
+      log_debug "bc not available, cost aggregation may lose precision"
+      ENGINE_COSTS[$engine]="N/A"
+    fi
+  fi
+
+  log_debug "Recorded result for $engine: tokens_in=$tokens_in, tokens_out=$tokens_out, cost=$cost, success=$success"
 }
 
 # ============================================
