@@ -1,32 +1,48 @@
-Agent 19: Add get_engine_color() function
-==========================================
+# Ralphy Progress Log
 
-Completed Tasks:
-1. Added get_engine_color() function in ralphy.sh (lines 119-131)
-   - Returns ANSI color codes for each engine:
-     * claude = blue
-     * cursor = green
-     * opencode = yellow
-     * codex = magenta
-     * qwen = cyan
-     * droid = red
-   - Accepts optional engine parameter or uses AI_ENGINE variable
-   - Returns magenta as default for unknown engines
+## 2026-01-19: Add bc availability check in pre-flight
 
-2. Applied get_engine_color() in display locations:
-   - Brownfield mode banner (line 2814)
-   - PRD mode banner (line 2850)
-   - Both locations now use dynamic color from function instead of hardcoded values
+### Summary
+Implemented bc availability check in pre-flight checks, set USE_BC_FOR_COSTS flag, and added warnings if bc is not installed.
 
-3. Created comprehensive test suite (test_get_engine_color.sh):
-   - Tests all 6 engine color mappings
-   - Tests default case for unknown engines
-   - Tests AI_ENGINE variable usage
-   - All 8 tests pass successfully
+### Changes Made
 
-Technical Details:
-- Function follows existing pattern from ralphy.sh
-- Compatible with color detection system (lines 54-67)
-- Works with tput-based ANSI color codes
-- Maintains fallback for terminals without color support
-- No breaking changes to existing functionality
+1. **Added USE_BC_FOR_COSTS global variable** (ralphy.sh:87)
+   - Flag to track whether bc is available for cost calculations
+   - Initialized to false by default
+
+2. **Added bc availability check in pre-flight** (ralphy.sh:934-941)
+   - Checks if bc command is available using `command -v bc`
+   - Sets USE_BC_FOR_COSTS=true if bc is found
+   - Displays warning message if bc is not installed
+   - Provides installation instructions for Debian/Ubuntu and macOS
+
+3. **Updated calculate_cost function** (ralphy.sh:1692-1700)
+   - Changed from direct `command -v bc` check to USE_BC_FOR_COSTS flag
+   - Returns "N/A" when bc is not available
+
+4. **Updated cost tracking section** (ralphy.sh:1851)
+   - Changed from `command -v bc` to USE_BC_FOR_COSTS flag
+   - Ensures OpenCode cost tracking only happens when bc is available
+
+5. **Updated summary output section** (ralphy.sh:2742)
+   - Changed from `command -v bc` to USE_BC_FOR_COSTS flag
+   - Consistent cost calculation behavior across the script
+
+### Testing
+Created test_bc_check.sh with 7 test cases:
+- ✓ USE_BC_FOR_COSTS variable is defined
+- ✓ bc availability check exists in pre-flight section
+- ✓ Warning message for missing bc is present
+- ✓ calculate_cost function uses USE_BC_FOR_COSTS flag
+- ✓ Cost tracking uses USE_BC_FOR_COSTS flag
+- ✓ Summary output uses USE_BC_FOR_COSTS flag
+- ✓ All bc checks consolidated to use USE_BC_FOR_COSTS flag
+
+All tests passed successfully.
+
+### Benefits
+- Single point of bc availability check (pre-flight)
+- Consistent cost calculation behavior throughout script
+- Clear user feedback when bc is missing
+- Better maintainability with centralized flag

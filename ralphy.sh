@@ -84,6 +84,7 @@ declare -a integration_branches=()  # Track integration branches for cleanup on 
 WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
+USE_BC_FOR_COSTS=false  # Flag to indicate if bc is available for cost calculations
 
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engines to use for parallel tasks
@@ -1287,6 +1288,15 @@ check_requirements() {
     exit 1
   fi
 
+  # Check for bc (optional but recommended for cost calculations)
+  if command -v bc &>/dev/null; then
+    USE_BC_FOR_COSTS=true
+  else
+    USE_BC_FOR_COSTS=false
+    log_warn "bc is not installed. Cost calculations will not be available."
+    log_warn "Install bc for cost tracking: apt-get install bc (Debian/Ubuntu) or brew install bc (macOS)"
+  fi
+
   # Ensure .ralphy/ directory exists and create progress.txt if missing
   mkdir -p "$RALPHY_DIR"
   if [[ ! -f "$PROGRESS_FILE" ]]; then
@@ -2035,8 +2045,8 @@ check_for_errors() {
 calculate_cost() {
   local input=$1
   local output=$2
-  
-  if command -v bc &>/dev/null; then
+
+  if [[ "$USE_BC_FOR_COSTS" == true ]]; then
     echo "scale=4; ($input * 0.000003) + ($output * 0.000015)" | bc
   else
     echo "N/A"
@@ -2193,7 +2203,7 @@ run_single_task() {
         # Cursor duration tracking
         local dur_ms="${actual_cost#duration:}"
         [[ "$dur_ms" =~ ^[0-9]+$ ]] && total_duration_ms=$((total_duration_ms + dur_ms))
-      elif [[ "$actual_cost" != "0" ]] && command -v bc &>/dev/null; then
+      elif [[ "$actual_cost" != "0" ]] && [[ "$USE_BC_FOR_COSTS" == true ]]; then
         # OpenCode cost tracking
         total_actual_cost=$(echo "scale=6; $total_actual_cost + $actual_cost" | bc 2>/dev/null || echo "$total_actual_cost")
       fi
@@ -3181,7 +3191,7 @@ show_summary() {
     echo "Total tokens:  $((total_input_tokens + total_output_tokens))"
     
     # Show actual cost if available (OpenCode provides this), otherwise estimate
-    if [[ "$AI_ENGINE" == "opencode" ]] && command -v bc &>/dev/null; then
+    if [[ "$AI_ENGINE" == "opencode" ]] && [[ "$USE_BC_FOR_COSTS" == true ]]; then
       local has_actual_cost
       has_actual_cost=$(echo "$total_actual_cost > 0" | bc 2>/dev/null || echo "0")
       if [[ "$has_actual_cost" == "1" ]]; then
