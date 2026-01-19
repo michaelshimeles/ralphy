@@ -1081,11 +1081,11 @@ get_tasks_github() {
 }
 
 get_next_task_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --limit 1 --json number,title)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
 
   gh issue list "${args[@]}" \
-    --jq '.[0] | "\(.number):\(.title)"' 2>/dev/null | cut -c1-50 || echo ""
+    --jq 'sort_by(.number) | .[0] | "\(.number):\(.title)"' 2>/dev/null | cut -c1-50 || echo ""
 }
 
 count_remaining_github() {
@@ -2832,7 +2832,11 @@ main() {
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
-  echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
+  if [[ "$PRD_SOURCE" == "github" ]]; then
+    echo "Source: ${CYAN}github${RESET} ($GITHUB_REPO)"
+  else
+    echo "Source: ${CYAN}$PRD_SOURCE${RESET} ($PRD_FILE)"
+  fi
   if [[ -d "$RALPHY_DIR" ]]; then
     echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
   fi
