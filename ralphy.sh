@@ -2245,6 +2245,33 @@ run_single_task() {
 # PARALLEL TASK EXECUTION
 # ============================================
 
+# Get engine for a specific agent number
+# Returns the appropriate engine based on distribution strategy
+# Falls back to AI_ENGINE if ENGINES array is not set
+get_engine_for_agent() {
+  local agent_num="$1"
+
+  # If ENGINES array is not set or empty, use default AI_ENGINE
+  if [[ -z "${ENGINES[*]}" ]]; then
+    echo "${AI_ENGINE:-claude}"
+    return 0
+  fi
+
+  # For now, implement simple round-robin distribution
+  # More advanced distribution strategies will be added later
+  local engine_count=${#ENGINES[@]}
+  local engine_index=$((agent_num % engine_count))
+  echo "${ENGINES[$engine_index]}"
+}
+
+# Deserialize engine configuration from environment variables
+# This allows engine config to be passed to subshells
+deserialize_engine_config() {
+  # Stub implementation - will be enhanced when serialize_engine_config() is implemented
+  # For now, this is a no-op placeholder
+  :
+}
+
 # Create an isolated worktree for a parallel agent
 create_agent_worktree() {
   local task_name="$1"
@@ -2309,14 +2336,23 @@ cleanup_agent_worktree() {
 run_parallel_agent() {
   local task_name="$1"
   local agent_num="$2"
-  local output_file="$3"
-  local status_file="$4"
-  local log_file="$5"
-  
+  local engine="$3"
+  local output_file="$4"
+  local status_file="$5"
+  local log_file="$6"
+
+  # Deserialize engine configuration from environment
+  deserialize_engine_config
+
+  # Set AI_ENGINE for this subshell
+  export AI_ENGINE="$engine"
+
   echo "setting up" > "$status_file"
+  echo "engine=$engine" >> "$status_file"
   
   # Log setup info
   echo "Agent $agent_num starting for task: $task_name" >> "$log_file"
+  echo "Engine: $engine" >> "$log_file"
   echo "ORIGINAL_DIR=$ORIGINAL_DIR" >> "$log_file"
   echo "WORKTREE_BASE=$WORKTREE_BASE" >> "$log_file"
   echo "BASE_BRANCH=$BASE_BRANCH" >> "$log_file"
@@ -2720,6 +2756,7 @@ run_parallel_tasks() {
         local status_file=$(mktemp)
         local output_file=$(mktemp)
         local log_file=$(mktemp)
+        local engine=$(get_engine_for_agent "$agent_num")
 
         batch_tasks+=("$task")
         status_files+=("$status_file")
@@ -2733,7 +2770,7 @@ run_parallel_tasks() {
 
         # Run agent in background
         (
-          run_parallel_agent "$task" "$agent_num" "$output_file" "$status_file" "$log_file"
+          run_parallel_agent "$task" "$agent_num" "$engine" "$output_file" "$status_file" "$log_file"
         ) &
         parallel_pids+=($!)
       done
