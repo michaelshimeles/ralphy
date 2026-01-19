@@ -1,39 +1,41 @@
-## Completed Tasks
+## Task: Modify engine flags to append to ENGINES array
 
-### Implement --engines CLI argument parsing in parse_args()
+### Changes Made:
 
-**Location:** ralphy.sh:712-748
+1. **Added multi-engine configuration variables** (ralphy.sh:88-96)
+   - Added ENGINES array to store multiple engines
+   - Added ENGINE_DISTRIBUTION variable (defaults to "round-robin")
+   - Added ENGINE_WEIGHTS associative array for weighted distribution
+   - Added ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES tracking arrays
+   - Added VALID_ENGINES array with valid engine names: claude, opencode, cursor, codex, qwen, droid
 
-**What was implemented:**
-1. Added `ENGINES` array and `ENGINE_WEIGHTS` associative array variable declarations (lines 48-49)
-2. Implemented `--engines` argument parsing in parse_args() function (lines 712-748)
+2. **Implemented append_engine() helper function** (ralphy.sh:679-697)
+   - Checks if engine already exists in ENGINES array
+   - Only appends if not already present (deduplication)
+   - Handles --cursor/--agent alias correctly (both add "cursor")
 
-**Features:**
-- Parses comma-separated list of engines into ENGINES array
-- Supports weight syntax: `engine:weight` (e.g., `claude:5`)
-- Validates that weights are positive integers (rejects zero and negative values)
-- Supports engine names without weights (defaults to weight of 1)
-- Allows alphanumeric engine names with hyphens and underscores
-- Provides clear error messages for invalid specifications
+3. **Modified all engine flags** (ralphy.sh:715-742)
+   - Changed --opencode, --claude, --cursor, --agent, --codex, --qwen, --droid flags
+   - Now call append_engine() instead of setting AI_ENGINE directly
+   - Maintains backward compatibility (AI_ENGINE still exists for single-engine mode)
+   - Both --cursor and --agent flags now append "cursor" to avoid duplicates
 
-**Examples:**
-- `--engines claude` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=1
-- `--engines claude:5` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=5
-- `--engines claude:3,opencode,cursor:2` → ENGINES=(claude opencode cursor), ENGINE_WEIGHTS[claude]=3, ENGINE_WEIGHTS[opencode]=1, ENGINE_WEIGHTS[cursor]=2
+4. **Created comprehensive test suite** (test_engine_flags.sh)
+   - Tests single engine flag
+   - Tests multiple different engines
+   - Tests duplicate engine flags (deduplication)
+   - Tests --cursor/--agent alias deduplication
+   - Tests mixed scenarios with cursor aliases
+   - Tests all engines together
+   - All 8 tests passing
 
-**Validation:**
-- Engine names must match pattern: `^[a-zA-Z0-9_-]+$`
-- Weight syntax must match pattern: `^([a-zA-Z0-9_-]+):([0-9]+)$`
-- Weights must be positive integers (> 0)
-- Invalid formats are rejected with error messages
+### Testing:
+- Ran test_engine_flags.sh: All 8 tests passed
+- Verified deduplication works correctly for --cursor/--agent alias
+- Verified duplicate flags are properly deduplicated
 
-**Testing:**
-Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
-- Valid engine names (with/without hyphens/underscores)
-- Engine with weight syntax parsing
-- Comma-separated list splitting
-- Zero and negative weight rejection
-- Invalid format rejection
-- Special character rejection
-
-All tests passed successfully.
+### Implementation Notes:
+- The append_engine() function ensures no duplicate engines in ENGINES array
+- --cursor and --agent are treated as aliases for the same engine "cursor"
+- This change prepares ralphy for multi-engine parallel execution
+- Backward compatibility maintained: AI_ENGINE variable still exists for future compatibility layer
