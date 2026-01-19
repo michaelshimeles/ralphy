@@ -1,11 +1,2 @@
-Added multi-engine configuration variables to ralphy.sh after line 85:
-- ENGINES array for storing engines to use in rotation
-- ENGINE_DISTRIBUTION string for distribution pattern (e.g., "claude:2,opencode:1")
-- ENGINE_WEIGHTS associative array for weight/priority per engine
-- ENGINE_AGENT_COUNT associative array for number of agents per engine
-- ENGINE_COSTS associative array for total cost tracking per engine
-- ENGINE_SUCCESS associative array for success count per engine
-- ENGINE_FAILURES associative array for failure count per engine
-- VALID_ENGINES array containing: claude, opencode, cursor, codex, qwen, droid
-
-These variables will support multi-engine distribution and tracking in parallel execution mode.
+- [✓] 2026-01-19 13:11 - test
+- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
