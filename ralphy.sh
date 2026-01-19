@@ -85,6 +85,11 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine support
+declare -a ENGINES=()  # Array of engines to use
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Engine weights for weighted distribution
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -2149,6 +2154,98 @@ Focus only on implementing: $task_name"
   fi
 }
 
+# Get engine for a given agent number
+# Args: agent_num (1-indexed)
+# Returns: engine name
+get_engine_for_agent() {
+  local agent_num=$1
+
+  # If no engines configured or only one engine, use AI_ENGINE
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    echo "$AI_ENGINE"
+    return 0
+  fi
+
+  if [[ ${#ENGINES[@]} -eq 1 ]]; then
+    echo "${ENGINES[0]}"
+    return 0
+  fi
+
+  # Distribution strategies
+  local engine_count=${#ENGINES[@]}
+  # Convert 1-indexed agent_num to 0-indexed for array access
+  local zero_based=$((agent_num - 1))
+
+  case "$ENGINE_DISTRIBUTION" in
+    round-robin)
+      # Simple round-robin: cycle through engines
+      local idx=$((zero_based % engine_count))
+      echo "${ENGINES[$idx]}"
+      ;;
+    *)
+      # Default to round-robin
+      local idx=$((zero_based % engine_count))
+      echo "${ENGINES[$idx]}"
+      ;;
+  esac
+}
+
+# Display engine assignment preview table for first 10 tasks
+# Reads from global all_tasks array
+print_engine_assignment_preview() {
+  # Use eval to access the array passed by name
+  local array_name="$1[@]"
+  local tasks_array=("${!array_name}")
+  local num_tasks=${#tasks_array[@]}
+  local preview_count=$((num_tasks < 10 ? num_tasks : 10))
+
+  # Skip if only one engine or default engine
+  if [[ ${#ENGINES[@]} -le 1 ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "${BOLD}Engine Assignment Preview (first $preview_count tasks):${RESET}"
+  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+  # Print header
+  printf "${BOLD}%-8s %-12s %-50s${RESET}\n" "Agent" "Engine" "Task"
+  echo "${DIM}────────────────────────────────────────────────────────────────────${RESET}"
+
+  # Print preview for first 10 tasks
+  for ((i = 0; i < preview_count; i++)); do
+    local agent_num=$((i + 1))
+    local engine=$(get_engine_for_agent "$agent_num")
+    local task="${tasks_array[$i]}"
+
+    # Truncate task name if too long
+    if [[ ${#task} -gt 48 ]]; then
+      task="${task:0:45}..."
+    fi
+
+    # Color engine name
+    local engine_display
+    case "$engine" in
+      opencode) engine_display="${CYAN}${engine}${RESET}" ;;
+      cursor) engine_display="${YELLOW}${engine}${RESET}" ;;
+      codex) engine_display="${BLUE}${engine}${RESET}" ;;
+      qwen) engine_display="${GREEN}${engine}${RESET}" ;;
+      droid) engine_display="${MAGENTA}${engine}${RESET}" ;;
+      claude) engine_display="${MAGENTA}${engine}${RESET}" ;;
+      *) engine_display="${engine}" ;;
+    esac
+
+    printf "%-8s %-12s %-50s\n" "$agent_num" "$engine_display" "$task"
+  done
+
+  if [[ $num_tasks -gt 10 ]]; then
+    echo "${DIM}... and $((num_tasks - 10)) more tasks${RESET}"
+  fi
+
+  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo ""
+}
+
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
   
@@ -2200,6 +2297,11 @@ run_parallel_tasks() {
     while IFS= read -r group; do
       [[ -n "$group" ]] && groups+=("$group")
     done < <(yq -r '.tasks[] | select(.completed != true) | (.parallel_group // 0)' "$PRD_FILE" 2>/dev/null | sort -n | uniq)
+  fi
+
+  # Display engine assignment preview if in dry-run mode or using multiple engines
+  if [[ "$DRY_RUN" == true ]] || [[ ${#ENGINES[@]} -gt 1 ]]; then
+    print_engine_assignment_preview all_tasks
   fi
 
   for group in "${groups[@]}"; do
@@ -2754,6 +2856,11 @@ show_summary() {
 
 main() {
   parse_args "$@"
+
+  # Backward compatibility: populate ENGINES if not set
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    ENGINES=("$AI_ENGINE")
+  fi
 
   # Handle --init mode
   if [[ "$INIT_MODE" == true ]]; then

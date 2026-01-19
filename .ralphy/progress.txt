@@ -1,0 +1,30 @@
+## Agent 13 Progress
+
+### Task: Add engine assignment preview table to dry-run output
+
+**Implementation Details:**
+
+1. Added multi-engine infrastructure:
+   - Added ENGINES array, ENGINE_DISTRIBUTION, and ENGINE_WEIGHTS variables after line 86
+   - Implemented get_engine_for_agent() function with round-robin distribution strategy
+   - Added backward compatibility to populate ENGINES array with AI_ENGINE if empty
+
+2. Implemented engine assignment preview table:
+   - Created print_engine_assignment_preview() function that displays first 10 tasks
+   - Shows agent number (1-indexed), assigned engine (color-coded), and task name
+   - Truncates long task names to 48 characters
+   - Displays summary for remaining tasks if more than 10
+   - Only shows preview when multiple engines are configured
+
+3. Integration:
+   - Added preview table call in run_parallel_tasks() function
+   - Preview is shown when DRY_RUN is true or when multiple engines are configured
+   - Table appears after task collection and before batch processing begins
+
+**Files Modified:**
+- ralphy.sh: Lines 87-90 (multi-engine variables), Lines 2157-2247 (functions), Line 2301 (preview call), Line 2858 (backward compatibility)
+
+**Testing:**
+- Created and ran test script to verify round-robin distribution
+- Confirmed agent numbers are 1-indexed and cycle correctly through engines
+- Verified table formatting and color coding for different engines
