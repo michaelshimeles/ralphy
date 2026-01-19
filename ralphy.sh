@@ -1860,6 +1860,8 @@ run_single_task() {
       fi
       rm -f "$tmpfile"
       tmpfile=""
+      # Record failure result with zero metrics
+      record_agent_result "$AI_ENGINE" "0" "0" "0" "0" "0"
       return_to_base_branch
       return 1
     fi
@@ -1876,6 +1878,8 @@ run_single_task() {
       fi
       rm -f "$tmpfile"
       tmpfile=""
+      # Record failure result with zero metrics
+      record_agent_result "$AI_ENGINE" "0" "0" "0" "0" "0"
       return_to_base_branch
       return 1
     fi
@@ -1938,6 +1942,26 @@ run_single_task() {
       create_pull_request "$branch_name" "$current_task" "Automated implementation by Ralphy"
     fi
 
+    # Calculate cost and duration for recording
+    local cost duration_ms
+    cost="0"
+    duration_ms="0"
+    if [[ -n "$actual_cost" ]]; then
+      if [[ "$actual_cost" == duration:* ]]; then
+        duration_ms="${actual_cost#duration:}"
+        cost="0"
+      elif [[ "$actual_cost" != "0" ]]; then
+        cost="$actual_cost"
+      fi
+    fi
+    # Calculate estimated cost if not provided
+    if [[ "$cost" == "0" ]] && [[ "$input_tokens" -gt 0 || "$output_tokens" -gt 0 ]]; then
+      cost=$(calculate_cost "$input_tokens" "$output_tokens")
+    fi
+
+    # Record successful result
+    record_agent_result "$AI_ENGINE" "$cost" "$input_tokens" "$output_tokens" "$duration_ms" "1"
+
     # Return to base branch
     return_to_base_branch
 
@@ -1958,6 +1982,9 @@ run_single_task() {
 
     return 0
   done
+
+  # Record failure result with zero metrics
+  record_agent_result "$AI_ENGINE" "0" "0" "0" "0" "0"
 
   return_to_base_branch
   return 1
@@ -2173,13 +2200,14 @@ Focus only on implementing: $task_name"
   
   if [[ "$success" == true ]]; then
     # Parse tokens
-    local parsed input_tokens output_tokens
+    local parsed input_tokens output_tokens actual_cost
     local CODEX_LAST_MESSAGE_FILE="${tmpfile}.last"
     parsed=$(parse_ai_result "$result")
     local token_data
     token_data=$(echo "$parsed" | sed -n '/^---TOKENS---$/,$p' | tail -3)
     input_tokens=$(echo "$token_data" | sed -n '1p')
     output_tokens=$(echo "$token_data" | sed -n '2p')
+    actual_cost=$(echo "$token_data" | sed -n '3p')
     [[ "$input_tokens" =~ ^[0-9]+$ ]] || input_tokens=0
     [[ "$output_tokens" =~ ^[0-9]+$ ]] || output_tokens=0
     rm -f "${tmpfile}.last"
@@ -2192,10 +2220,29 @@ Focus only on implementing: $task_name"
       echo "ERROR: No new commits created; treating task as failed." >> "$log_file"
       echo "failed" > "$status_file"
       echo "0 0" > "$output_file"
+
+      # Record failure result
+      local cost duration_ms
+      cost="0"
+      duration_ms="0"
+      if [[ -n "$actual_cost" ]]; then
+        if [[ "$actual_cost" == duration:* ]]; then
+          duration_ms="${actual_cost#duration:}"
+          cost="0"
+        elif [[ "$actual_cost" != "0" ]]; then
+          cost="$actual_cost"
+        fi
+      fi
+      # Calculate estimated cost if not provided
+      if [[ "$cost" == "0" ]] && [[ "$input_tokens" -gt 0 || "$output_tokens" -gt 0 ]]; then
+        cost=$(calculate_cost "$input_tokens" "$output_tokens")
+      fi
+      record_agent_result "$AI_ENGINE" "$cost" "$input_tokens" "$output_tokens" "$duration_ms" "0"
+
       cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
       return 1
     fi
-    
+
     # Create PR if requested
     if [[ "$CREATE_PR" == true ]]; then
       (
@@ -2209,16 +2256,39 @@ Focus only on implementing: $task_name"
           ${PR_DRAFT:+--draft} 2>>"$log_file" || true
       )
     fi
-    
+
+    # Calculate cost and duration for recording
+    local cost duration_ms
+    cost="0"
+    duration_ms="0"
+    if [[ -n "$actual_cost" ]]; then
+      if [[ "$actual_cost" == duration:* ]]; then
+        duration_ms="${actual_cost#duration:}"
+        cost="0"
+      elif [[ "$actual_cost" != "0" ]]; then
+        cost="$actual_cost"
+      fi
+    fi
+    # Calculate estimated cost if not provided
+    if [[ "$cost" == "0" ]] && [[ "$input_tokens" -gt 0 || "$output_tokens" -gt 0 ]]; then
+      cost=$(calculate_cost "$input_tokens" "$output_tokens")
+    fi
+
+    # Record successful result
+    record_agent_result "$AI_ENGINE" "$cost" "$input_tokens" "$output_tokens" "$duration_ms" "1"
+
     # Write success output
     echo "done" > "$status_file"
     echo "$input_tokens $output_tokens $branch_name" > "$output_file"
-    
+
     # Cleanup worktree (but keep branch)
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
-    
+
     return 0
   else
+    # Record failure result with zero metrics
+    record_agent_result "$AI_ENGINE" "0" "0" "0" "0" "0"
+
     echo "failed" > "$status_file"
     echo "0 0" > "$output_file"
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"

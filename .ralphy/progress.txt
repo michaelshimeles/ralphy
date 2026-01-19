@@ -88,3 +88,96 @@ This implementation provides the foundation for multi-engine tracking. To comple
 - `ralphy.sh`: Added associative arrays and record_agent_result() function
 - `test_record_agent_result.sh`: Created comprehensive test suite (NEW)
 - `.ralphy/progress.txt`: This file (NEW)
+
+---
+
+## Task: Call record_agent_result() after each agent completes
+
+### Implementation Summary
+
+Integrated calls to `record_agent_result()` throughout ralphy.sh to track metrics after each agent completes execution, both in parallel and sequential modes.
+
+### Changes Made
+
+1. **Parallel Agent Execution - Success Path** (ralphy.sh:2233-2251)
+   - Added extraction of `actual_cost` from parsed result (line 2183)
+   - Added cost and duration calculation logic (lines 2233-2248)
+   - Extracts duration from `duration:XXX` format for Cursor/Droid engines
+   - Calculates estimated cost using `calculate_cost()` when actual cost not provided
+   - Calls `record_agent_result()` with engine, cost, tokens, duration, and success=1 (line 2251)
+
+2. **Parallel Agent Execution - Failure Paths**
+   - **No-commit failure path** (lines 2197-2213)
+     - Extracts tokens and cost even when commit check fails
+     - Calls `record_agent_result()` with success=0 before cleanup
+   - **General failure path** (lines 2262-2263)
+     - Calls `record_agent_result()` with zero metrics when agent execution fails
+     - Ensures all failures are tracked
+
+3. **Sequential Task Execution - Success Path** (ralphy.sh:1941-1959)
+   - Added cost and duration calculation after task completion
+   - Extracts duration from `actual_cost` if present
+   - Calculates estimated cost if not provided by engine
+   - Calls `record_agent_result()` with success=1 after task is marked complete
+
+4. **Sequential Task Execution - Failure Paths**
+   - **Empty response failure** (lines 1863-1864)
+     - Calls `record_agent_result()` with zero metrics after max retries
+   - **API error failure** (lines 1881-1882)
+     - Calls `record_agent_result()` with zero metrics after max retries
+   - **General retry exhaustion** (lines 1982-1983)
+     - Calls `record_agent_result()` with zero metrics when all retries fail
+
+5. **Created Integration Test Suite** (test_agent_result_calls.sh)
+   - Tests that `record_agent_result()` is called in all execution paths
+   - Validates parameters (engine, cost, tokens, duration, success status)
+   - Verifies cost calculation and duration extraction logic
+   - All 12 tests pass successfully
+
+### Technical Implementation Details
+
+**Cost Handling:**
+- OpenCode: Uses actual cost from `.part.cost` field
+- Claude/Qwen: Calculates estimated cost using token counts
+- All engines: Falls back to `calculate_cost()` if actual cost not available
+
+**Duration Handling:**
+- Cursor: Extracts duration from `duration:XXX` format in actual_cost
+- Droid: Extracts duration from completion event
+- Claude/OpenCode/Qwen: Duration set to 0 (not provided)
+
+**Success Status:**
+- Success = "1": Task completed with commits/changes
+- Success = "0": Task failed due to errors, empty response, or no commits
+
+### Integration Points
+
+The function is called at these locations:
+1. `run_parallel_agent()` success: ralphy.sh:2251
+2. `run_parallel_agent()` no-commit failure: ralphy.sh:2213
+3. `run_parallel_agent()` general failure: ralphy.sh:2263
+4. `run_single_task()` success: ralphy.sh:1959
+5. `run_single_task()` empty response failure: ralphy.sh:1864
+6. `run_single_task()` API error failure: ralphy.sh:1882
+7. `run_single_task()` general failure: ralphy.sh:1983
+
+### Testing
+
+To run integration tests:
+```bash
+./test_agent_result_calls.sh
+```
+
+All tests pass:
+- ✓ record_agent_result() called in parallel agent success path
+- ✓ record_agent_result() called in parallel agent failure paths
+- ✓ record_agent_result() called in single task success path
+- ✓ record_agent_result() called in single task failure paths
+- ✓ Cost calculation before record_agent_result() calls
+- ✓ Parameter extraction for record_agent_result() calls
+
+### Files Modified
+
+- `ralphy.sh`: Added 7 calls to record_agent_result() across all completion paths
+- `test_agent_result_calls.sh`: Created integration test suite (NEW)
+- `.ralphy/progress.txt`: Updated with implementation details
