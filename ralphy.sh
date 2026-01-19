@@ -1021,26 +1021,6 @@ show_version() {
 # ARGUMENT PARSING
 # ============================================
 
-# Helper function to append an engine to ENGINES array with deduplication
-# For --cursor/--agent alias, both add "cursor" to avoid duplicates
-append_engine() {
-  local engine="$1"
-
-  # Check if engine already exists in ENGINES array
-  local exists=false
-  for e in "${ENGINES[@]}"; do
-    if [[ "$e" == "$engine" ]]; then
-      exists=true
-      break
-    fi
-  done
-
-  # Only append if not already present
-  if [[ "$exists" == false ]]; then
-    ENGINES+=("$engine")
-  fi
-}
-
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -1058,11 +1038,11 @@ parse_args() {
         shift
         ;;
       --opencode)
-        append_engine "opencode"
+        AI_ENGINE="opencode"
         shift
         ;;
       --claude)
-        append_engine "claude"
+        AI_ENGINE="claude"
         shift
         ;;
       --sonnet)
@@ -1070,55 +1050,20 @@ parse_args() {
         shift
         ;;
       --cursor|--agent)
-        append_engine "cursor"
+        AI_ENGINE="cursor"
         shift
         ;;
       --codex)
-        append_engine "codex"
+        AI_ENGINE="codex"
         shift
         ;;
       --qwen)
-        append_engine "qwen"
+        AI_ENGINE="qwen"
         shift
         ;;
       --droid)
-        append_engine "droid"
+        AI_ENGINE="droid"
         shift
-        ;;
-      --engines)
-        [[ -z "${2:-}" ]] && { log_error "--engines requires an argument"; exit 1; }
-        local engines_arg="$2"
-
-        # Split comma-separated list into ENGINES array
-        IFS=',' read -ra ENGINES <<< "$engines_arg"
-
-        # Parse each engine for weight syntax (engine:weight)
-        for i in "${!ENGINES[@]}"; do
-          local engine_spec="${ENGINES[$i]}"
-
-          if [[ "$engine_spec" =~ ^([a-zA-Z0-9_-]+):([0-9]+)$ ]]; then
-            local engine="${BASH_REMATCH[1]}"
-            local weight="${BASH_REMATCH[2]}"
-
-            # Validate weight is a positive integer
-            if [[ "$weight" -le 0 ]]; then
-              log_error "Engine weight must be a positive integer: $engine_spec"
-              exit 1
-            fi
-
-            # Store engine and weight
-            ENGINES[$i]="$engine"
-            ENGINE_WEIGHTS["$engine"]="$weight"
-          elif [[ "$engine_spec" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            # Engine without weight, default weight is 1
-            ENGINE_WEIGHTS["$engine_spec"]=1
-          else
-            log_error "Invalid engine specification: $engine_spec"
-            exit 1
-          fi
-        done
-
-        shift 2
         ;;
       --dry-run)
         DRY_RUN=true
@@ -1142,22 +1087,6 @@ parse_args() {
         ;;
       --max-parallel)
         MAX_PARALLEL="${2:-3}"
-        shift 2
-        ;;
-      --engine-distribution)
-        case "${2:-}" in
-          round-robin|weighted|random|fill-first)
-            ENGINE_DISTRIBUTION="$2"
-            ;;
-          "")
-            log_error "--engine-distribution requires an argument"
-            exit 1
-            ;;
-          *)
-            log_error "Invalid engine distribution: $2. Must be one of: round-robin, weighted, random, fill-first"
-            exit 1
-            ;;
-        esac
         shift 2
         ;;
       --branch-per-task)
@@ -1240,17 +1169,6 @@ parse_args() {
         ;;
     esac
   done
-
-  # Backward compatibility: maintain AI_ENGINE for single-engine usage
-  local num_engines="${#ENGINES[@]}"
-  if [[ "$num_engines" -eq 1 ]]; then
-    # If exactly one engine specified, set AI_ENGINE for backward compatibility
-    AI_ENGINE="${ENGINES[0]}"
-  elif [[ "$num_engines" -eq 0 ]]; then
-    # If no engines specified, populate ENGINES with default AI_ENGINE
-    ENGINES=("$AI_ENGINE")
-    ENGINE_WEIGHTS["$AI_ENGINE"]=1
-  fi
 }
 
 # ============================================
@@ -2588,89 +2506,21 @@ Focus only on implementing: $task_name"
 
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-
+  
   local all_tasks=()
-
+  
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")
   done < <(get_all_tasks)
-
+  
   if [[ ${#all_tasks[@]} -eq 0 ]]; then
     log_info "No tasks to run"
     return 2
   fi
-
+  
   local total_tasks=${#all_tasks[@]}
   log_info "Found $total_tasks tasks to process"
-
-  # Handle dry-run mode - show what would be executed
-  if [[ "$DRY_RUN" == true ]]; then
-    echo ""
-    log_info "${BOLD}DRY RUN - Parallel Execution Plan${RESET}"
-    echo ""
-
-    # Display engine configuration if multi-engine is configured
-    if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 1 ]]; then
-      echo "${BOLD}Engine Distribution:${RESET}"
-      display_engines_config
-      echo ""
-
-      # Show task assignment preview (first 10 tasks)
-      echo "${BOLD}Task Assignment Preview (first 10):${RESET}"
-      local preview_count=$((total_tasks < 10 ? total_tasks : 10))
-      for ((i = 0; i < preview_count; i++)); do
-        local task="${all_tasks[$i]}"
-        local agent_num=$((i + 1))
-
-        # Simulate engine assignment based on distribution strategy
-        local assigned_engine=""
-        if [[ -n "${ENGINES:-}" ]] && [[ ${#ENGINES[@]} -gt 0 ]]; then
-          local engine_count=${#ENGINES[@]}
-          case "${ENGINE_DISTRIBUTION:-round-robin}" in
-            round-robin)
-              local engine_idx=$((agent_num % engine_count))
-              assigned_engine="${ENGINES[$engine_idx]}"
-              ;;
-            fill-first)
-              local agents_per_engine=$(( (total_tasks + engine_count - 1) / engine_count ))
-              local engine_idx=$(( (agent_num - 1) / agents_per_engine ))
-              [[ $engine_idx -ge $engine_count ]] && engine_idx=$((engine_count - 1))
-              assigned_engine="${ENGINES[$engine_idx]}"
-              ;;
-            random)
-              assigned_engine="${ENGINES[0]}"  # Can't truly simulate random in dry-run
-              ;;
-            weighted)
-              assigned_engine="${ENGINES[0]}"  # Simplified for dry-run preview
-              ;;
-            *)
-              assigned_engine="${ENGINES[0]}"
-              ;;
-          esac
-        else
-          assigned_engine="${AI_ENGINE:-claude}"
-        fi
-
-        echo "${DIM}  Agent $agent_num → ${CYAN}$assigned_engine${RESET}: $task${RESET}"
-      done
-
-      if [[ $total_tasks -gt 10 ]]; then
-        echo "${DIM}  ... and $((total_tasks - 10)) more tasks${RESET}"
-      fi
-      echo ""
-    fi
-
-    echo "${BOLD}Tasks to execute:${RESET}"
-    for ((i = 0; i < total_tasks; i++)); do
-      local task="${all_tasks[$i]}"
-      echo "${DIM}  $((i + 1)). $task${RESET}"
-    done
-    echo ""
-
-    log_info "Dry-run complete - no tasks were executed"
-    return 0
-  fi
   
   # Store original directory for git operations from subshells
   ORIGINAL_DIR=$(pwd)
@@ -3337,10 +3187,19 @@ main() {
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
-  display_engines_config
-  echo "Source:         ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
+  local engine_display
+  case "$AI_ENGINE" in
+    opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
+    cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
+    codex) engine_display="${BLUE}Codex${RESET}" ;;
+    qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
+    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
+    *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
+  esac
+  echo "Engine: $engine_display"
+  echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   if [[ -d "$RALPHY_DIR" ]]; then
-    echo "Config:         ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
+    echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
   fi
 
   local mode_parts=()
