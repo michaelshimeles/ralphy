@@ -1,80 +1,30 @@
-## Agent 9 Progress
+## Agent 13 Progress
 
-### Completed Tasks
+### Task: Add engine assignment preview table to dry-run output
 
-1. Added multi-engine configuration variables (lines 87-96 in ralphy.sh):
-   - ENGINES array for storing engine names
-   - ENGINE_DISTRIBUTION for distribution strategy
-   - ENGINE_WEIGHTS associative array for weighted distribution
-   - ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES for tracking
-   - VALID_ENGINES array with supported engines
+**Implementation Details:**
 
-2. Implemented get_engine_for_agent() function (lines 130-144 in ralphy.sh):
-   - Takes agent_num as parameter (0-based index)
-   - Returns engine name using round-robin distribution
-   - Formula: ENGINES[agent_num % engine_count]
-   - Falls back to AI_ENGINE default if ENGINES is empty
-   - Properly handles edge cases
+1. Added multi-engine infrastructure:
+   - Added ENGINES array, ENGINE_DISTRIBUTION, and ENGINE_WEIGHTS variables after line 86
+   - Implemented get_engine_for_agent() function with round-robin distribution strategy
+   - Added backward compatibility to populate ENGINES array with AI_ENGINE if empty
 
-3. Created comprehensive test suite (test_get_engine_for_agent.sh):
-   - Tests empty ENGINES array (should return default)
-   - Tests single engine (all agents get same engine)
-   - Tests two, three, and four engines with round-robin distribution
-   - Tests large agent numbers to verify modulo operation
-   - All 6 test cases pass successfully
+2. Implemented engine assignment preview table:
+   - Created print_engine_assignment_preview() function that displays first 10 tasks
+   - Shows agent number (1-indexed), assigned engine (color-coded), and task name
+   - Truncates long task names to 48 characters
+   - Displays summary for remaining tasks if more than 10
+   - Only shows preview when multiple engines are configured
 
-### Implementation Details
+3. Integration:
+   - Added preview table call in run_parallel_tasks() function
+   - Preview is shown when DRY_RUN is true or when multiple engines are configured
+   - Table appears after task collection and before batch processing begins
 
-The get_engine_for_agent() function implements round-robin distribution by:
-- Calculating engine_index = agent_num % engine_count
-- Returning the engine at that index from the ENGINES array
-- This ensures even distribution across all configured engines
-- Agent 0 gets ENGINES[0], agent 1 gets ENGINES[1], etc.
-- After reaching the last engine, it cycles back to the first
+**Files Modified:**
+- ralphy.sh: Lines 87-90 (multi-engine variables), Lines 2157-2247 (functions), Line 2301 (preview call), Line 2858 (backward compatibility)
 
-### Files Modified
-
-- ralphy.sh: Added multi-engine variables and get_engine_for_agent() function
-- test_get_engine_for_agent.sh: New test file with comprehensive test coverage
-
-## Agent 12 Progress
-
-### Completed Tasks
-
-1. Added fill-first distribution strategy to get_engine_for_agent() function:
-   - Modified function to accept optional total_agents parameter
-   - Added case statement to support multiple distribution strategies
-   - Implemented fill-first strategy with agents_per_engine calculation
-   - Formula: agents_per_engine = ceil(total_agents / engine_count)
-   - Engine assignment: engine_index = agent_num / agents_per_engine
-   - Falls back to round-robin when total_agents not provided
-   - Handles edge cases (more engines than agents, out of bounds)
-
-2. Enhanced test suite with 8 additional test cases for fill-first:
-   - Test 7: 2 engines, 10 agents (5 per engine)
-   - Test 8: 3 engines, 10 agents (4 per engine, uneven distribution)
-   - Test 9: 4 engines, 10 agents (3 per engine)
-   - Test 10: 3 engines, 9 agents (perfectly divisible)
-   - Test 11: Single engine with fill-first
-   - Test 12: More engines than agents (5 engines, 3 agents)
-   - Test 13: Fallback to round-robin when total_agents not provided
-   - Test 14: Large numbers (100 agents, 3 engines)
-   - All 14 test cases pass successfully
-
-### Implementation Details
-
-The fill-first distribution strategy works by:
-- Calculating agents_per_engine using ceiling division: (total_agents + engine_count - 1) / engine_count
-- Assigning agents sequentially to engines until each engine is filled
-- Example with 3 engines and 10 agents:
-  - agents_per_engine = ceil(10/3) = 4
-  - Agents 0-3 → engine 0 (claude)
-  - Agents 4-7 → engine 1 (opencode)
-  - Agents 8-9 → engine 2 (cursor)
-- This fills the first engine completely before moving to the next
-- Prevents out-of-bounds access with: if (engine_index >= engine_count) engine_index = engine_count - 1
-
-### Files Modified
-
-- ralphy.sh (lines 129-180): Updated get_engine_for_agent() with fill-first strategy support
-- test_get_engine_for_agent.sh: Added 8 new test cases for fill-first distribution
+**Testing:**
+- Created and ran test script to verify round-robin distribution
+- Confirmed agent numbers are 1-indexed and cycle correctly through engines
+- Verified table formatting and color coding for different engines
