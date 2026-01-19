@@ -9,3 +9,5 @@ Added multi-engine configuration variables to ralphy.sh after line 85:
 - VALID_ENGINES array containing: claude, opencode, cursor, codex, qwen, droid
 
 These variables will support multi-engine distribution and tracking in parallel execution mode.
+
+- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
