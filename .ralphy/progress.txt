@@ -1,33 +1,32 @@
-## Agent 18 - Update status display format to show engine name
+Agent 19: Add get_engine_color() function
+==========================================
 
-### Changes Made:
+Completed Tasks:
+1. Added get_engine_color() function in ralphy.sh (lines 119-131)
+   - Returns ANSI color codes for each engine:
+     * claude = blue
+     * cursor = green
+     * opencode = yellow
+     * codex = magenta
+     * qwen = cyan
+     * droid = red
+   - Accepts optional engine parameter or uses AI_ENGINE variable
+   - Returns magenta as default for unknown engines
 
-1. Added `get_engine_short_name()` helper function (ralphy.sh:120-128)
-   - Returns short engine name based on AI_ENGINE global variable
-   - Supports: claude, opencode, cursor, codex, qwen, droid
+2. Applied get_engine_color() in display locations:
+   - Brownfield mode banner (line 2814)
+   - PRD mode banner (line 2850)
+   - Both locations now use dynamic color from function instead of hardcoded values
 
-2. Updated initial agent status display (ralphy.sh:2264)
-   - Changed format from "Agent N: status" to "Agent N (engine): status"
-   - Example: "Agent 1 (claude): Implement feature X"
+3. Created comprehensive test suite (test_get_engine_color.sh):
+   - Tests all 6 engine color mappings
+   - Tests default case for unknown engines
+   - Tests AI_ENGINE variable usage
+   - All 8 tests pass successfully
 
-3. Updated final agent status display (ralphy.sh:2391)
-   - Changed format from "Agent N: status" to "Agent N (engine): status"
-   - Includes success/failure icon and branch info
-   - Example: "✓ Agent 1 (claude): Implement feature X [branch-name]"
-
-4. Updated failed agent log header (ralphy.sh:2395)
-   - Changed format from "Agent N log:" to "Agent N (engine) log:"
-   - Example: "┌─ Agent 1 (claude) log:"
-
-5. Created test suite (test_engine_display.sh)
-   - Tests all 6 supported engines plus unknown/default case
-   - All 7 tests passing
-
-### Files Modified:
-- ralphy.sh (3 display locations + 1 helper function)
-- test_engine_display.sh (new test file)
-
-### Testing:
-- Unit tests created and passing (7/7)
-- Function correctly returns engine names for all supported engines
-- Default case (unknown engine) correctly returns "claude"
+Technical Details:
+- Function follows existing pattern from ralphy.sh
+- Compatible with color detection system (lines 54-67)
+- Works with tput-based ANSI color codes
+- Maintains fallback for terminals without color support
+- No breaking changes to existing functionality
