@@ -1,0 +1,14 @@
+## Agent 25 - Include engine name in per-agent result output
+
+### Changes Made:
+1. Added `get_engine_name()` helper function to return engine display names (OpenCode, Cursor Agent, Codex, Qwen-Code, Factory Droid, Claude Code, or Claude Code (sonnet))
+2. Updated `run_parallel_agent()` to write engine name to output_file in all cases (success and failure)
+3. Exported CLAUDE_MODEL variable so it's available in agent subprocesses
+4. Modified batch results display to parse and show engine name in format: "Agent N (engine): task"
+5. Engine name is displayed in dim color using ${DIM} formatting
+
+### Format:
+- Success: `✓ Agent N (Engine Name): task → branch`
+- Failure: `✗ Agent N (Engine Name): task (error below)`
+
+The engine name now appears in parentheses after the agent number in all per-agent result outputs.

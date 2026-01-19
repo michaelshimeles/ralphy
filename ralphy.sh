@@ -1950,6 +1950,24 @@ cleanup_agent_worktree() {
   # Don't delete branch - it may have commits we want to keep/PR
 }
 
+# Get engine display name (no color codes for storing in files)
+get_engine_name() {
+  case "$AI_ENGINE" in
+    opencode) echo "OpenCode" ;;
+    cursor) echo "Cursor Agent" ;;
+    codex) echo "Codex" ;;
+    qwen) echo "Qwen-Code" ;;
+    droid) echo "Factory Droid" ;;
+    *)
+      if [[ -n "$CLAUDE_MODEL" ]]; then
+        echo "Claude Code ($CLAUDE_MODEL)"
+      else
+        echo "Claude Code"
+      fi
+      ;;
+  esac
+}
+
 # Run a single agent in its own isolated worktree
 run_parallel_agent() {
   local task_name="$1"
@@ -1978,7 +1996,9 @@ run_parallel_agent() {
   if [[ ! -d "$worktree_dir" ]]; then
     echo "failed" > "$status_file"
     echo "ERROR: Worktree directory does not exist: $worktree_dir" >> "$log_file"
-    echo "0 0" > "$output_file"
+    local engine_name
+    engine_name=$(get_engine_name)
+    echo "0 0 - $engine_name" > "$output_file"
     return 1
   fi
   
@@ -2114,7 +2134,9 @@ Focus only on implementing: $task_name"
     if [[ "$commit_count" -eq 0 ]]; then
       echo "ERROR: No new commits created; treating task as failed." >> "$log_file"
       echo "failed" > "$status_file"
-      echo "0 0" > "$output_file"
+      local engine_name
+      engine_name=$(get_engine_name)
+      echo "0 0 - $engine_name" > "$output_file"
       cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
       return 1
     fi
@@ -2134,8 +2156,10 @@ Focus only on implementing: $task_name"
     fi
     
     # Write success output
+    local engine_name
+    engine_name=$(get_engine_name)
     echo "done" > "$status_file"
-    echo "$input_tokens $output_tokens $branch_name" > "$output_file"
+    echo "$input_tokens $output_tokens $branch_name $engine_name" > "$output_file"
     
     # Cleanup worktree (but keep branch)
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
@@ -2143,7 +2167,9 @@ Focus only on implementing: $task_name"
     return 0
   else
     echo "failed" > "$status_file"
-    echo "0 0" > "$output_file"
+    local engine_name
+    engine_name=$(get_engine_name)
+    echo "0 0 - $engine_name" > "$output_file"
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
     return 1
   fi
@@ -2189,7 +2215,7 @@ run_parallel_tasks() {
   integration_branches=()  # Reset for this run
 
   # Export variables needed by subshell agents
-  export AI_ENGINE MAX_RETRIES RETRY_DELAY PRD_SOURCE PRD_FILE CREATE_PR PR_DRAFT
+  export AI_ENGINE CLAUDE_MODEL MAX_RETRIES RETRY_DELAY PRD_SOURCE PRD_FILE CREATE_PR PR_DRAFT
 
   local batch_num=0
   local completed_branches=()
@@ -2343,16 +2369,17 @@ run_parallel_tasks() {
         local status=$(cat "$status_file" 2>/dev/null || echo "unknown")
         local agent_num=$((iteration - batch_size + j + 1))
 
-        local icon color branch_info=""
+        local icon color branch_info="" engine_info=""
         case "$status" in
           done)
             icon="✓"
             color="$GREEN"
-            # Collect tokens and branch name
+            # Collect tokens, branch name, and engine name
             local output_data=$(cat "$output_file" 2>/dev/null || echo "0 0")
             local in_tok=$(echo "$output_data" | awk '{print $1}')
             local out_tok=$(echo "$output_data" | awk '{print $2}')
             local branch=$(echo "$output_data" | awk '{print $3}')
+            local engine=$(echo "$output_data" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//')
             [[ "$in_tok" =~ ^[0-9]+$ ]] || in_tok=0
             [[ "$out_tok" =~ ^[0-9]+$ ]] || out_tok=0
             total_input_tokens=$((total_input_tokens + in_tok))
@@ -2361,6 +2388,9 @@ run_parallel_tasks() {
               completed_branches+=("$branch")
               group_completed_branches+=("$branch")  # Also track per-group
               branch_info=" → ${CYAN}$branch${RESET}"
+            fi
+            if [[ -n "$engine" ]]; then
+              engine_info=" ${DIM}($engine)${RESET}"
             fi
 
             # Mark task complete in PRD
@@ -2375,6 +2405,12 @@ run_parallel_tasks() {
           failed)
             icon="✗"
             color="$RED"
+            # Extract engine name from output file
+            local output_data=$(cat "$output_file" 2>/dev/null || echo "0 0")
+            local engine=$(echo "$output_data" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//')
+            if [[ -n "$engine" ]]; then
+              engine_info=" ${DIM}($engine)${RESET}"
+            fi
             if [[ -s "$log_file" ]]; then
               branch_info=" ${DIM}(error below)${RESET}"
             fi
@@ -2385,7 +2421,7 @@ run_parallel_tasks() {
             ;;
         esac
 
-        printf "  ${color}%s${RESET} Agent %d: %s%s\n" "$icon" "$agent_num" "${task:0:45}" "$branch_info"
+        printf "  ${color}%s${RESET} Agent %d%s: %s%s\n" "$icon" "$agent_num" "$engine_info" "${task:0:45}" "$branch_info"
 
         # Show log for failed agents
         if [[ "$status" == "failed" ]] && [[ -s "$log_file" ]]; then
