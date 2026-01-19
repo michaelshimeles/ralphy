@@ -1,39 +1,28 @@
-Task: Verify backward compatibility: single engine flag works, no engine uses default, single task mode works, existing config without parallel.engines works
+# Task: Add multi-engine section to README.md
 
-Completed: 2026-01-19
+## What was done:
+1. Added comprehensive multi-engine documentation to README.md section "AI Engines"
+2. Documented --engines flag with weight syntax (e.g., claude:7,cursor:3)
+3. Documented --engine-distribution flag with all four strategies:
+   - round-robin: cycles through engines
+   - weighted: respects weight ratios
+   - fill-first: fills first engine before using next
+   - random: random selection from available engines
+4. Added config.yaml format example showing:
+   - parallel.engines array with name and weight fields
+   - parallel.distribution field
+   - parallel.max_concurrent field
+5. Provided CLI usage examples for each distribution strategy
+6. Updated the Options table to include both new flags
+7. Added weight syntax documentation explaining ratio interpretation
 
-Summary:
-Created comprehensive backward compatibility test suite (test_backward_compatibility.sh) to verify all existing functionality continues to work correctly.
+## Files modified:
+- README.md: Added multi-engine section with comprehensive usage examples
 
-Tests verified:
-1. Single engine flag functionality (--claude, --opencode, --cursor, --codex, --qwen, --droid)
-   - All flags correctly parse and set AI_ENGINE variable
-   - All flags are present in the script and documented in help text
-
-2. Default engine behavior
-   - Confirmed default is "claude" when no engine flag is specified
-   - Default is set at initialization (line 30 in ralphy.sh)
-
-3. --sonnet flag for Claude Sonnet model
-   - Verified --sonnet flag sets CLAUDE_MODEL="sonnet"
-   - Confirmed conditional --model flag is passed to claude CLI
-
-4. Single task mode (brownfield)
-   - SINGLE_TASK variable properly initialized
-   - run_brownfield_task() function exists and handles all engines
-   - Each engine has proper case statement handling
-
-5. Existing config without parallel.engines
-   - Created test config file without new parallel.engines field
-   - Verified config can be read successfully with yq
-   - Confirmed parallel.engines field is absent (backward compatible)
-
-6. Parallel mode compatibility
-   - AI_ENGINE is exported for parallel agent execution
-   - PARALLEL flag parsing works correctly
-   - MAX_PARALLEL defaults to 3
-
-All 14 test categories passed with 31 individual assertions.
-
-Test file: ./test_backward_compatibility.sh
-Run with: ./test_backward_compatibility.sh
+## Result:
+The README.md now contains complete documentation for the multi-engine feature, including:
+- CLI flag syntax and examples
+- All four distribution strategies
+- Weight syntax explanation
+- YAML config file format
+- Clear examples for each use case
