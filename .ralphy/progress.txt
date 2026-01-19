@@ -1,14 +1,30 @@
-# Ralphy Progress Log
+Implemented load_parallel_config() function and integrated it into main()
 
-[2026-01-19] Implemented load_parallel_config() function
-- Added load_parallel_config() function in ralphy.sh (lines 428-474)
-- Function loads parallel execution config from .ralphy/config.yaml using yq
-- Reads parallel.engines array with name and weight fields
-- Reads parallel.distribution strategy (round-robin, weighted, random, fill-first)
-- Reads parallel.max_concurrent for maximum concurrent tasks
-- Returns space-separated format: "engine1:weight1 engine2:weight2|distribution|max_concurrent"
-- Handles missing config gracefully (returns empty string)
-- Defaults: weight=1, distribution=round-robin, max_concurrent=3
-- Created .ralphy/config.yaml with example parallel configuration
-- Created comprehensive test suites (test_load_parallel_config.sh and test_load_parallel_config_extended.sh)
-- All 9 test cases pass successfully
+Changes:
+1. Added multi-engine configuration variables after line 86:
+   - ENGINES array for storing engine names
+   - ENGINE_DISTRIBUTION for distribution strategy
+   - ENGINE_WEIGHTS associative array for engine weights
+   - ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES for tracking
+   - VALID_ENGINES array with valid engine names
+
+2. Implemented load_parallel_config() function that:
+   - Loads parallel configuration from .ralphy/config.yaml using yq
+   - Reads parallel.engines array with name and weight fields
+   - Reads parallel.distribution setting
+   - Reads parallel.max_concurrent setting
+   - Defaults weights to 1 when not specified
+   - Gracefully handles missing config file or missing yq command
+
+3. Called load_parallel_config() in main() after parse_args():
+   - Only loads config if ENGINES array is empty (not set via CLI)
+   - Ensures CLI arguments take precedence over config file
+
+4. Created test_load_parallel_config.sh with integration tests:
+   - Tests config file parsing with engines and weights
+   - Tests distribution and max_concurrent loading
+   - Tests default weight behavior
+   - Tests graceful handling of missing config
+   - All tests pass successfully
+
+The implementation follows the task specification exactly and maintains backward compatibility.

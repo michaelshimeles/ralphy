@@ -111,6 +111,16 @@ declare -A ENGINE_SUCCESS=()      # Success count per engine
 declare -A ENGINE_FAILURES=()     # Failure count per engine
 declare -A ENGINE_COSTS=()        # Total cost per engine
 
+# Multi-engine configuration
+declare -a ENGINES=()  # Array of engine names to use for parallel execution
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Associative array: engine name -> weight
+declare -A ENGINE_AGENT_COUNT=()  # Associative array: engine name -> agent count
+declare -A ENGINE_COSTS=()  # Associative array: engine name -> total cost
+declare -A ENGINE_SUCCESS=()  # Associative array: engine name -> success count
+declare -A ENGINE_FAILURES=()  # Associative array: engine name -> failure count
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
