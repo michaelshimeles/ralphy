@@ -1,0 +1,28 @@
+# Task: Add multi-engine section to README.md
+
+## What was done:
+1. Added comprehensive multi-engine documentation to README.md section "AI Engines"
+2. Documented --engines flag with weight syntax (e.g., claude:7,cursor:3)
+3. Documented --engine-distribution flag with all four strategies:
+   - round-robin: cycles through engines
+   - weighted: respects weight ratios
+   - fill-first: fills first engine before using next
+   - random: random selection from available engines
+4. Added config.yaml format example showing:
+   - parallel.engines array with name and weight fields
+   - parallel.distribution field
+   - parallel.max_concurrent field
+5. Provided CLI usage examples for each distribution strategy
+6. Updated the Options table to include both new flags
+7. Added weight syntax documentation explaining ratio interpretation
+
+## Files modified:
+- README.md: Added multi-engine section with comprehensive usage examples
+
+## Result:
+The README.md now contains complete documentation for the multi-engine feature, including:
+- CLI flag syntax and examples
+- All four distribution strategies
+- Weight syntax explanation
+- YAML config file format
+- Clear examples for each use case
