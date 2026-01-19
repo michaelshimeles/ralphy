@@ -1,14 +1,14 @@
-Implemented print_engine_summary() function and integrated it into the final report section.
+## Agent 25 - Include engine name in per-agent result output
 
-Changes made:
-1. Added print_engine_summary() function (lines 2695-2723) that:
-   - Only displays in parallel mode with multiple engines
-   - Shows configured engines as a placeholder
-   - Includes TODO comments for full implementation when task 47 is complete
+### Changes Made:
+1. Added `get_engine_name()` helper function to return engine display names (OpenCode, Cursor Agent, Codex, Qwen-Code, Factory Droid, Claude Code, or Claude Code (sonnet))
+2. Updated `run_parallel_agent()` to write engine name to output_file in all cases (success and failure)
+3. Exported CLAUDE_MODEL variable so it's available in agent subprocesses
+4. Modified batch results display to parse and show engine name in format: "Agent N (engine): task"
+5. Engine name is displayed in dim color using ${DIM} formatting
 
-2. Called print_engine_summary() in show_summary() function (line 2779):
-   - Added after the "Branches Created" section
-   - Added before the final separator line
-   - Includes descriptive comment explaining when it displays
+### Format:
+- Success: `✓ Agent N (Engine Name): task → branch`
+- Failure: `✗ Agent N (Engine Name): task (error below)`
 
-This completes task 49 from multi-engine-sprints.md. The function is ready to be enhanced with full engine tracking metrics once task 47 (record_agent_result) is implemented.
+The engine name now appears in parentheses after the agent number in all per-agent result outputs.
