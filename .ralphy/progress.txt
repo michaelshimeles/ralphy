@@ -36,3 +36,45 @@ The get_engine_for_agent() function implements round-robin distribution by:
 
 - ralphy.sh: Added multi-engine variables and get_engine_for_agent() function
 - test_get_engine_for_agent.sh: New test file with comprehensive test coverage
+
+## Agent 12 Progress
+
+### Completed Tasks
+
+1. Added fill-first distribution strategy to get_engine_for_agent() function:
+   - Modified function to accept optional total_agents parameter
+   - Added case statement to support multiple distribution strategies
+   - Implemented fill-first strategy with agents_per_engine calculation
+   - Formula: agents_per_engine = ceil(total_agents / engine_count)
+   - Engine assignment: engine_index = agent_num / agents_per_engine
+   - Falls back to round-robin when total_agents not provided
+   - Handles edge cases (more engines than agents, out of bounds)
+
+2. Enhanced test suite with 8 additional test cases for fill-first:
+   - Test 7: 2 engines, 10 agents (5 per engine)
+   - Test 8: 3 engines, 10 agents (4 per engine, uneven distribution)
+   - Test 9: 4 engines, 10 agents (3 per engine)
+   - Test 10: 3 engines, 9 agents (perfectly divisible)
+   - Test 11: Single engine with fill-first
+   - Test 12: More engines than agents (5 engines, 3 agents)
+   - Test 13: Fallback to round-robin when total_agents not provided
+   - Test 14: Large numbers (100 agents, 3 engines)
+   - All 14 test cases pass successfully
+
+### Implementation Details
+
+The fill-first distribution strategy works by:
+- Calculating agents_per_engine using ceiling division: (total_agents + engine_count - 1) / engine_count
+- Assigning agents sequentially to engines until each engine is filled
+- Example with 3 engines and 10 agents:
+  - agents_per_engine = ceil(10/3) = 4
+  - Agents 0-3 → engine 0 (claude)
+  - Agents 4-7 → engine 1 (opencode)
+  - Agents 8-9 → engine 2 (cursor)
+- This fills the first engine completely before moving to the next
+- Prevents out-of-bounds access with: if (engine_index >= engine_count) engine_index = engine_count - 1
+
+### Files Modified
+
+- ralphy.sh (lines 129-180): Updated get_engine_for_agent() with fill-first strategy support
+- test_get_engine_for_agent.sh: Added 8 new test cases for fill-first distribution

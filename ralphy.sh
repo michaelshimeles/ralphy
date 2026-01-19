@@ -126,11 +126,12 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
-# Get engine for agent using round-robin distribution
-# Args: agent_num (0-based index)
+# Get engine for agent using configured distribution strategy
+# Args: agent_num (0-based index), total_agents (optional, required for fill-first)
 # Returns: engine name
 get_engine_for_agent() {
   local agent_num=$1
+  local total_agents=${2:-0}
   local engine_count=${#ENGINES[@]}
 
   # If no engines configured, return default
@@ -139,9 +140,43 @@ get_engine_for_agent() {
     return
   fi
 
-  # Round-robin distribution: agent_num % engine_count
-  local engine_index=$((agent_num % engine_count))
-  echo "${ENGINES[$engine_index]}"
+  case "$ENGINE_DISTRIBUTION" in
+    round-robin)
+      # Round-robin distribution: agent_num % engine_count
+      local engine_index=$((agent_num % engine_count))
+      echo "${ENGINES[$engine_index]}"
+      ;;
+
+    fill-first)
+      # Fill-first distribution: fill engines sequentially
+      # Calculate agents_per_engine based on total agents
+      if [[ $total_agents -le 0 ]]; then
+        # Fallback to round-robin if total_agents not provided
+        local engine_index=$((agent_num % engine_count))
+        echo "${ENGINES[$engine_index]}"
+        return
+      fi
+
+      # Calculate how many agents per engine (using ceiling division)
+      local agents_per_engine=$(( (total_agents + engine_count - 1) / engine_count ))
+
+      # Determine which engine based on agent_num / agents_per_engine
+      local engine_index=$((agent_num / agents_per_engine))
+
+      # Ensure we don't go out of bounds (in case of rounding)
+      if [[ $engine_index -ge $engine_count ]]; then
+        engine_index=$((engine_count - 1))
+      fi
+
+      echo "${ENGINES[$engine_index]}"
+      ;;
+
+    *)
+      # Default to round-robin for unknown strategies
+      local engine_index=$((agent_num % engine_count))
+      echo "${ENGINES[$engine_index]}"
+      ;;
+  esac
 }
 
 # ============================================
