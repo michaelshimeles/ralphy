@@ -1,0 +1,88 @@
+## Task: Create serialize_engine_config() and deserialize_engine_config() functions
+
+### Implementation Summary
+
+Successfully implemented serialization and deserialization functions to pass ENGINE_WEIGHTS and related multi-engine configuration through environment variables to subshells.
+
+### Changes Made
+
+1. **Added Multi-Engine Configuration Variables** (ralphy.sh:88-96)
+   - `declare -a ENGINES=()` - Array of engine names to use
+   - `ENGINE_DISTRIBUTION="round-robin"` - Distribution strategy
+   - `declare -A ENGINE_WEIGHTS=()` - Map of engine names to weights
+   - `declare -A ENGINE_AGENT_COUNT=()` - Track agents per engine
+   - `declare -A ENGINE_SUCCESS=()` - Track successful runs per engine
+   - `declare -A ENGINE_FAILURES=()` - Track failed runs per engine
+   - `declare -A ENGINE_COSTS=()` - Track cumulative costs per engine
+   - `declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")`
+
+2. **Implemented serialize_engine_config()** (ralphy.sh:136-218)
+   - Converts indexed arrays to comma-separated strings
+   - Converts associative arrays to pipe-delimited key:value pairs
+   - Exports all configuration as environment variables
+   - Format examples:
+     - `ENGINES_SERIALIZED="claude,cursor,opencode"`
+     - `ENGINE_WEIGHTS_SERIALIZED="claude:2|cursor:3|opencode:1"`
+
+3. **Implemented deserialize_engine_config()** (ralphy.sh:220-298)
+   - Reconstructs indexed arrays from comma-separated strings
+   - Reconstructs associative arrays from pipe-delimited pairs
+   - Uses `declare -gA` to create global associative arrays in subshell context
+   - Parses key:value pairs using Bash parameter expansion
+
+### Technical Details
+
+**Serialization Strategy:**
+- Bash associative arrays cannot be exported to subshells
+- Solution: Serialize to string format in environment variables
+- Delimiter choices:
+  - `,` (comma) for array elements
+  - `:` (colon) for key-value separator
+  - `|` (pipe) for multiple key-value pairs
+  - These characters are safe for typical engine names
+
+**Key Functions:**
+- Uses `IFS=,; echo "${array[*]}"` for array-to-string conversion
+- Uses `IFS='|' read -ra pairs` for parsing pipe-delimited strings
+- Uses `${pair%%:*}` and `${pair##*:}` for splitting key:value pairs
+
+### Testing
+
+Created comprehensive test documentation in `test_engine_serialization.md`:
+- Test Case 1: Empty configuration
+- Test Case 2: Single engine configuration
+- Test Case 3: Multiple engines with weights
+- Test Case 4: Distribution strategy serialization
+- Test Case 5: Valid engines array
+- Test Case 6: Special characters in engine names
+
+**Note:** Automated tests require Bash 4.0+ for associative array support. The default macOS Bash (3.2) does not support associative arrays. Users on macOS should install Bash 4+ via Homebrew.
+
+### Integration Points
+
+The functions are designed to be called:
+1. **Parent Process** (in `run_parallel_tasks`):
+   - Initialize engine configuration
+   - Call `serialize_engine_config()` before spawning subshells
+   - Serialized values are automatically exported to environment
+
+2. **Subshell Process** (in `run_parallel_agent`):
+   - Call `deserialize_engine_config()` at start
+   - Reconstructed arrays are available for engine selection logic
+
+### Files Modified
+
+1. `ralphy.sh` - Added global variables and serialization functions
+2. `test_engine_serialization.md` - Comprehensive test documentation
+3. `.ralphy/progress.txt` - This file
+
+### Next Steps
+
+This implementation completes task 3.3 from the multi-engine sprint:
+- ✅ serialize_engine_config() function implemented
+- ✅ deserialize_engine_config() function implemented
+- ✅ Proper environment variable export/import
+- ✅ Support for all engine configuration arrays
+- ✅ Test documentation created
+
+The functions are ready to be integrated into the parallel execution flow when tasks 3.9 and 3.10 are implemented (adding serialize/deserialize calls to run_parallel_tasks and run_parallel_agent).
