@@ -198,6 +198,177 @@ validate_engines() {
 }
 
 # ============================================
+# MULTI-ENGINE CONFIGURATION SERIALIZATION
+# ============================================
+
+# Serialize engine configuration to environment variables for subshell access
+# Bash associative arrays cannot be exported to subshells, so we serialize
+# them to pipe-delimited strings: "key1:value1|key2:value2"
+serialize_engine_config() {
+  log_debug "Serializing engine configuration for subshell export"
+
+  # Serialize ENGINES array to comma-separated string
+  if [[ ${#ENGINES[@]} -gt 0 ]]; then
+    export ENGINES_SERIALIZED
+    ENGINES_SERIALIZED=$(IFS=,; echo "${ENGINES[*]}")
+    log_debug "ENGINES_SERIALIZED=$ENGINES_SERIALIZED"
+  else
+    export ENGINES_SERIALIZED=""
+  fi
+
+  # Serialize ENGINE_WEIGHTS associative array to pipe-delimited key:value pairs
+  local weights_str=""
+  for engine in "${!ENGINE_WEIGHTS[@]}"; do
+    local weight="${ENGINE_WEIGHTS[$engine]}"
+    if [[ -n "$weights_str" ]]; then
+      weights_str="${weights_str}|${engine}:${weight}"
+    else
+      weights_str="${engine}:${weight}"
+    fi
+  done
+  export ENGINE_WEIGHTS_SERIALIZED="$weights_str"
+  log_debug "ENGINE_WEIGHTS_SERIALIZED=$ENGINE_WEIGHTS_SERIALIZED"
+
+  # Serialize ENGINE_AGENT_COUNT associative array
+  local agent_count_str=""
+  for engine in "${!ENGINE_AGENT_COUNT[@]}"; do
+    local count="${ENGINE_AGENT_COUNT[$engine]}"
+    if [[ -n "$agent_count_str" ]]; then
+      agent_count_str="${agent_count_str}|${engine}:${count}"
+    else
+      agent_count_str="${engine}:${count}"
+    fi
+  done
+  export ENGINE_AGENT_COUNT_SERIALIZED="$agent_count_str"
+  log_debug "ENGINE_AGENT_COUNT_SERIALIZED=$ENGINE_AGENT_COUNT_SERIALIZED"
+
+  # Serialize ENGINE_SUCCESS associative array
+  local success_str=""
+  for engine in "${!ENGINE_SUCCESS[@]}"; do
+    local count="${ENGINE_SUCCESS[$engine]}"
+    if [[ -n "$success_str" ]]; then
+      success_str="${success_str}|${engine}:${count}"
+    else
+      success_str="${engine}:${count}"
+    fi
+  done
+  export ENGINE_SUCCESS_SERIALIZED="$success_str"
+  log_debug "ENGINE_SUCCESS_SERIALIZED=$ENGINE_SUCCESS_SERIALIZED"
+
+  # Serialize ENGINE_FAILURES associative array
+  local failures_str=""
+  for engine in "${!ENGINE_FAILURES[@]}"; do
+    local count="${ENGINE_FAILURES[$engine]}"
+    if [[ -n "$failures_str" ]]; then
+      failures_str="${failures_str}|${engine}:${count}"
+    else
+      failures_str="${engine}:${count}"
+    fi
+  done
+  export ENGINE_FAILURES_SERIALIZED="$failures_str"
+  log_debug "ENGINE_FAILURES_SERIALIZED=$ENGINE_FAILURES_SERIALIZED"
+
+  # Serialize ENGINE_COSTS associative array
+  local costs_str=""
+  for engine in "${!ENGINE_COSTS[@]}"; do
+    local cost="${ENGINE_COSTS[$engine]}"
+    if [[ -n "$costs_str" ]]; then
+      costs_str="${costs_str}|${engine}:${cost}"
+    else
+      costs_str="${engine}:${cost}"
+    fi
+  done
+  export ENGINE_COSTS_SERIALIZED="$costs_str"
+  log_debug "ENGINE_COSTS_SERIALIZED=$ENGINE_COSTS_SERIALIZED"
+
+  # Export distribution strategy and valid engines
+  export ENGINE_DISTRIBUTION
+  export VALID_ENGINES_SERIALIZED
+  VALID_ENGINES_SERIALIZED=$(IFS=,; echo "${VALID_ENGINES[*]}")
+  log_debug "ENGINE_DISTRIBUTION=$ENGINE_DISTRIBUTION"
+}
+
+# Deserialize engine configuration from environment variables in subshell
+# Reconstructs the associative and indexed arrays from the serialized strings
+deserialize_engine_config() {
+  log_debug "Deserializing engine configuration in subshell"
+
+  # Deserialize ENGINES array from comma-separated string
+  if [[ -n "$ENGINES_SERIALIZED" ]]; then
+    IFS=',' read -ra ENGINES <<< "$ENGINES_SERIALIZED"
+    log_debug "Deserialized ENGINES: ${ENGINES[*]}"
+  fi
+
+  # Deserialize ENGINE_WEIGHTS from pipe-delimited key:value pairs
+  if [[ -n "$ENGINE_WEIGHTS_SERIALIZED" ]]; then
+    declare -gA ENGINE_WEIGHTS
+    IFS='|' read -ra weights_pairs <<< "$ENGINE_WEIGHTS_SERIALIZED"
+    for pair in "${weights_pairs[@]}"; do
+      local engine="${pair%%:*}"
+      local weight="${pair##*:}"
+      ENGINE_WEIGHTS["$engine"]="$weight"
+      log_debug "ENGINE_WEIGHTS[$engine]=$weight"
+    done
+  fi
+
+  # Deserialize ENGINE_AGENT_COUNT from pipe-delimited key:value pairs
+  if [[ -n "$ENGINE_AGENT_COUNT_SERIALIZED" ]]; then
+    declare -gA ENGINE_AGENT_COUNT
+    IFS='|' read -ra count_pairs <<< "$ENGINE_AGENT_COUNT_SERIALIZED"
+    for pair in "${count_pairs[@]}"; do
+      local engine="${pair%%:*}"
+      local count="${pair##*:}"
+      ENGINE_AGENT_COUNT["$engine"]="$count"
+      log_debug "ENGINE_AGENT_COUNT[$engine]=$count"
+    done
+  fi
+
+  # Deserialize ENGINE_SUCCESS from pipe-delimited key:value pairs
+  if [[ -n "$ENGINE_SUCCESS_SERIALIZED" ]]; then
+    declare -gA ENGINE_SUCCESS
+    IFS='|' read -ra success_pairs <<< "$ENGINE_SUCCESS_SERIALIZED"
+    for pair in "${success_pairs[@]}"; do
+      local engine="${pair%%:*}"
+      local count="${pair##*:}"
+      ENGINE_SUCCESS["$engine"]="$count"
+      log_debug "ENGINE_SUCCESS[$engine]=$count"
+    done
+  fi
+
+  # Deserialize ENGINE_FAILURES from pipe-delimited key:value pairs
+  if [[ -n "$ENGINE_FAILURES_SERIALIZED" ]]; then
+    declare -gA ENGINE_FAILURES
+    IFS='|' read -ra failures_pairs <<< "$ENGINE_FAILURES_SERIALIZED"
+    for pair in "${failures_pairs[@]}"; do
+      local engine="${pair%%:*}"
+      local count="${pair##*:}"
+      ENGINE_FAILURES["$engine"]="$count"
+      log_debug "ENGINE_FAILURES[$engine]=$count"
+    done
+  fi
+
+  # Deserialize ENGINE_COSTS from pipe-delimited key:value pairs
+  if [[ -n "$ENGINE_COSTS_SERIALIZED" ]]; then
+    declare -gA ENGINE_COSTS
+    IFS='|' read -ra costs_pairs <<< "$ENGINE_COSTS_SERIALIZED"
+    for pair in "${costs_pairs[@]}"; do
+      local engine="${pair%%:*}"
+      local cost="${pair##*:}"
+      ENGINE_COSTS["$engine"]="$cost"
+      log_debug "ENGINE_COSTS[$engine]=$cost"
+    done
+  fi
+
+  # Deserialize VALID_ENGINES array from comma-separated string
+  if [[ -n "$VALID_ENGINES_SERIALIZED" ]]; then
+    IFS=',' read -ra VALID_ENGINES <<< "$VALID_ENGINES_SERIALIZED"
+    log_debug "Deserialized VALID_ENGINES: ${VALID_ENGINES[*]}"
+  fi
+
+  log_debug "Engine configuration deserialization complete"
+}
+
+# ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
 

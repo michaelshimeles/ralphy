@@ -1,51 +1,88 @@
-Task 7: Display parsed engines in dry-run output showing distribution strategy and engine list with weights
+## Task: Create serialize_engine_config() and deserialize_engine_config() functions
 
-## Implementation Summary
+### Implementation Summary
 
-Implemented dry-run display functionality for multi-engine support in ralphy.sh:
+Successfully implemented serialization and deserialization functions to pass ENGINE_WEIGHTS and related multi-engine configuration through environment variables to subshells.
 
-### Changes Made:
+### Changes Made
 
-1. **Created display_engines_config() function** (lines 120-178)
-   - Displays engine configuration with weights
-   - Shows distribution strategy (round-robin, weighted, random, fill-first)
-   - Provides strategy explanation for each mode
-   - Maintains backward compatibility with single AI_ENGINE
+1. **Added Multi-Engine Configuration Variables** (ralphy.sh:88-96)
+   - `declare -a ENGINES=()` - Array of engine names to use
+   - `ENGINE_DISTRIBUTION="round-robin"` - Distribution strategy
+   - `declare -A ENGINE_WEIGHTS=()` - Map of engine names to weights
+   - `declare -A ENGINE_AGENT_COUNT=()` - Track agents per engine
+   - `declare -A ENGINE_SUCCESS=()` - Track successful runs per engine
+   - `declare -A ENGINE_FAILURES=()` - Track failed runs per engine
+   - `declare -A ENGINE_COSTS=()` - Track cumulative costs per engine
+   - `declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")`
 
-2. **Updated main banner section** (line 2959)
-   - Replaced inline engine display with call to display_engines_config()
-   - Improved formatting consistency (aligned "Source:" and "Config:" labels)
+2. **Implemented serialize_engine_config()** (ralphy.sh:136-218)
+   - Converts indexed arrays to comma-separated strings
+   - Converts associative arrays to pipe-delimited key:value pairs
+   - Exports all configuration as environment variables
+   - Format examples:
+     - `ENGINES_SERIALIZED="claude,cursor,opencode"`
+     - `ENGINE_WEIGHTS_SERIALIZED="claude:2|cursor:3|opencode:1"`
 
-3. **Added dry-run handling in run_parallel_tasks()** (lines 2227-2290)
-   - Displays "DRY RUN - Parallel Execution Plan" header
-   - Shows engine distribution configuration for multi-engine setups
-   - Includes task assignment preview (first 10 tasks) with simulated engine assignments
-   - Simulates engine assignment based on distribution strategy:
-     * round-robin: cycles through engines
-     * fill-first: fills engines sequentially
-     * random/weighted: uses first engine (simplified for preview)
-   - Lists all tasks to be executed
-   - Returns without executing any tasks
+3. **Implemented deserialize_engine_config()** (ralphy.sh:220-298)
+   - Reconstructs indexed arrays from comma-separated strings
+   - Reconstructs associative arrays from pipe-delimited pairs
+   - Uses `declare -gA` to create global associative arrays in subshell context
+   - Parses key:value pairs using Bash parameter expansion
 
-### Features Implemented:
+### Technical Details
 
-- **Multi-engine display**: Shows comma-separated list of engines with weights (e.g., "claude:3, opencode:1")
-- **Strategy explanations**: Clear descriptions of each distribution strategy
-- **Assignment preview**: Shows how agents 1-10 would be assigned to engines
-- **Backward compatibility**: Falls back to single engine display when ENGINES array not set
-- **Consistent formatting**: Maintains ralphy's existing color scheme and layout
+**Serialization Strategy:**
+- Bash associative arrays cannot be exported to subshells
+- Solution: Serialize to string format in environment variables
+- Delimiter choices:
+  - `,` (comma) for array elements
+  - `:` (colon) for key-value separator
+  - `|` (pipe) for multiple key-value pairs
+  - These characters are safe for typical engine names
 
-### Testing:
+**Key Functions:**
+- Uses `IFS=,; echo "${array[*]}"` for array-to-string conversion
+- Uses `IFS='|' read -ra pairs` for parsing pipe-delimited strings
+- Uses `${pair%%:*}` and `${pair##*:}` for splitting key:value pairs
 
-- Created test_dry_run_display.sh for manual verification
-- Verified bash syntax with `bash -n ralphy.sh`
-- Tested that ralphy.sh runs successfully with --help flag
+### Testing
 
-### Dependencies:
+Created comprehensive test documentation in `test_engine_serialization.md`:
+- Test Case 1: Empty configuration
+- Test Case 2: Single engine configuration
+- Test Case 3: Multiple engines with weights
+- Test Case 4: Distribution strategy serialization
+- Test Case 5: Valid engines array
+- Test Case 6: Special characters in engine names
 
-This implementation assumes the following variables exist (from tasks 1-6):
-- ENGINES array
-- ENGINE_DISTRIBUTION string
-- ENGINE_WEIGHTS associative array
+**Note:** Automated tests require Bash 4.0+ for associative array support. The default macOS Bash (3.2) does not support associative arrays. Users on macOS should install Bash 4+ via Homebrew.
 
-The code gracefully degrades when these variables are not set, maintaining backward compatibility with single-engine mode.
+### Integration Points
+
+The functions are designed to be called:
+1. **Parent Process** (in `run_parallel_tasks`):
+   - Initialize engine configuration
+   - Call `serialize_engine_config()` before spawning subshells
+   - Serialized values are automatically exported to environment
+
+2. **Subshell Process** (in `run_parallel_agent`):
+   - Call `deserialize_engine_config()` at start
+   - Reconstructed arrays are available for engine selection logic
+
+### Files Modified
+
+1. `ralphy.sh` - Added global variables and serialization functions
+2. `test_engine_serialization.md` - Comprehensive test documentation
+3. `.ralphy/progress.txt` - This file
+
+### Next Steps
+
+This implementation completes task 3.3 from the multi-engine sprint:
+- ✅ serialize_engine_config() function implemented
+- ✅ deserialize_engine_config() function implemented
+- ✅ Proper environment variable export/import
+- ✅ Support for all engine configuration arrays
+- ✅ Test documentation created
+
+The functions are ready to be integrated into the parallel execution flow when tasks 3.9 and 3.10 are implemented (adding serialize/deserialize calls to run_parallel_tasks and run_parallel_agent).
