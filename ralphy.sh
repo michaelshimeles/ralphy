@@ -121,6 +121,16 @@ declare -A ENGINE_SUCCESS=()  # Associative array: engine name -> success count
 declare -A ENGINE_FAILURES=()  # Associative array: engine name -> failure count
 declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
 
+# Multi-engine parallel execution
+declare -a ENGINES=()  # List of engines to use for parallel tasks
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Weights for weighted distribution (engine_name => weight)
+declare -A ENGINE_AGENT_COUNT=()  # Track number of agents per engine
+declare -A ENGINE_COSTS=()  # Track costs per engine
+declare -A ENGINE_SUCCESS=()  # Track successful tasks per engine
+declare -A ENGINE_FAILURES=()  # Track failed tasks per engine
+declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)  # Supported engines
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
