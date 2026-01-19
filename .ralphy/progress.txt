@@ -1,49 +1,14 @@
-## Agent 23 Progress
+Implemented print_engine_summary() function and integrated it into the final report section.
 
-### Implemented print_engine_summary() Function
+Changes made:
+1. Added print_engine_summary() function (lines 2695-2723) that:
+   - Only displays in parallel mode with multiple engines
+   - Shows configured engines as a placeholder
+   - Includes TODO comments for full implementation when task 47 is complete
 
-**Date:** 2026-01-19
+2. Called print_engine_summary() in show_summary() function (line 2779):
+   - Added after the "Branches Created" section
+   - Added before the final separator line
+   - Includes descriptive comment explaining when it displays
 
-**What was implemented:**
-
-1. **Added Multi-Engine Tracking Variables** (ralphy.sh:88-92)
-   - `ENGINE_AGENT_COUNT`: Associative array to track number of agents per engine
-   - `ENGINE_SUCCESS`: Associative array to track successful completions per engine
-   - `ENGINE_FAILURES`: Associative array to track failures per engine
-   - `ENGINE_COSTS`: Associative array to track total cost per engine
-
-2. **Implemented print_engine_summary() Function** (ralphy.sh:2757-2842)
-   - Displays formatted table with columns: Engine, Agents, Success, Failed, Cost
-   - Sorts engines alphabetically for consistent display
-   - Calculates and displays totals row in bold
-   - Handles missing engine data gracefully (returns early if no data)
-   - Supports both `bc` and `awk` for decimal arithmetic
-   - Formats costs to 4 decimal places
-   - Width-aligned columns for professional output
-
-**Function Features:**
-- Column headers: Engine, Agents, Success, Failed, Cost
-- Separator lines for readability
-- Per-engine statistics sorted alphabetically
-- Bold totals row showing aggregate stats
-- Graceful handling when no multi-engine data is available
-- Compatible with existing cost calculation infrastructure
-
-**Testing:**
-- Created test_print_engine_summary_simple.sh to verify output format
-- Verified correct alignment and formatting
-- Tested with multiple engines and various statistics
-- Confirmed bash syntax validation passes
-
-**Integration Notes:**
-- Function can be called in show_summary() after existing summary output
-- Will only display when ENGINE_AGENT_COUNT has data (parallel multi-engine mode)
-- Compatible with the record_agent_result() function that will populate the arrays
-- No breaking changes to existing functionality
-
-**Files Modified:**
-- ralphy.sh: Added tracking variables and print_engine_summary() function
-
-**Files Created:**
-- test_print_engine_summary.sh: Full test suite (requires bash 4+)
-- test_print_engine_summary_simple.sh: Simple output format verification
+This completes task 49 from multi-engine-sprints.md. The function is ready to be enhanced with full engine tracking metrics once task 47 (record_agent_result) is implemented.
