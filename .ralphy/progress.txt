@@ -1,0 +1,46 @@
+## Task: Implement validate_engines() function
+
+### What was implemented:
+
+1. **Added multi-engine configuration variables** (lines 88-96 in ralphy.sh):
+   - `ENGINES` array: stores the list of engines to use
+   - `ENGINE_DISTRIBUTION`: distribution pattern string
+   - `ENGINE_WEIGHTS`: associative array for engine weights
+   - `ENGINE_AGENT_COUNT`: tracks number of agents per engine
+   - `ENGINE_COSTS`: tracks total cost per engine
+   - `ENGINE_SUCCESS`: tracks success count per engine
+   - `ENGINE_FAILURES`: tracks failure count per engine
+   - `VALID_ENGINES`: array of valid engine names (claude, opencode, cursor, codex, qwen, droid)
+
+2. **Implemented validate_engines() function** (lines 129-198 in ralphy.sh):
+   - Validates that engines in ENGINES array are in VALID_ENGINES list
+   - Checks that CLI commands exist for each engine:
+     - claude → claude
+     - opencode → opencode
+     - cursor → agent
+     - codex → codex
+     - qwen → qwen
+     - droid → droid
+   - Warns about missing CLI commands
+   - Filters ENGINES array to only include engines with available CLIs
+   - Returns error if no valid engines are available
+   - Returns error if invalid engine names are provided
+
+3. **Created test file** (test_validate_engines.sh):
+   - Comprehensive test suite for validate_engines()
+   - Tests invalid engine names
+   - Tests valid engines with available CLIs
+   - Tests filtering of engines with missing CLIs
+   - Tests error when no engines have CLIs
+   - Tests multiple valid engines
+   - Tests cursor engine mapping to 'agent' CLI
+   - Gracefully handles bash version < 4.0 (associative arrays requirement)
+
+### Files modified:
+- ralphy.sh: Added multi-engine configuration variables and validate_engines() function
+- test_validate_engines.sh: Created new test file
+
+### Testing:
+- Bash syntax validation passed
+- Test suite created (requires Bash 4.0+ to run)
+- Function follows bash best practices with proper error handling
