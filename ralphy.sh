@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration
+declare -a ENGINES=()  # Array of engine names to use
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Weights for weighted distribution
+declare -A ENGINE_AGENT_COUNT=()  # Track number of agents per engine
+declare -A ENGINE_COSTS=()  # Track total cost per engine
+declare -A ENGINE_SUCCESS=()  # Track successful agents per engine
+declare -A ENGINE_FAILURES=()  # Track failed agents per engine
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -114,6 +124,24 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Get engine for agent using round-robin distribution
+# Args: agent_num (0-based index)
+# Returns: engine name
+get_engine_for_agent() {
+  local agent_num=$1
+  local engine_count=${#ENGINES[@]}
+
+  # If no engines configured, return default
+  if [[ $engine_count -eq 0 ]]; then
+    echo "$AI_ENGINE"
+    return
+  fi
+
+  # Round-robin distribution: agent_num % engine_count
+  local engine_index=$((agent_num % engine_count))
+  echo "${ENGINES[$engine_index]}"
 }
 
 # ============================================
