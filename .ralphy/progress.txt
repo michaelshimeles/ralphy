@@ -1,64 +1,11 @@
-Created comprehensive multi-engine specification document at docs/multi-engine-spec.md
+Added multi-engine configuration variables to ralphy.sh after line 85:
+- ENGINES array for storing engines to use in rotation
+- ENGINE_DISTRIBUTION string for distribution pattern (e.g., "claude:2,opencode:1")
+- ENGINE_WEIGHTS associative array for weight/priority per engine
+- ENGINE_AGENT_COUNT associative array for number of agents per engine
+- ENGINE_COSTS associative array for total cost tracking per engine
+- ENGINE_SUCCESS associative array for success count per engine
+- ENGINE_FAILURES associative array for failure count per engine
+- VALID_ENGINES array containing: claude, opencode, cursor, codex, qwen, droid
 
-✅ IMPLEMENTATION COMPLETE
-
-Created detailed specification document marking the multi-engine feature as complete with comprehensive documentation of:
-
-1. Architecture & Core Variables
-   - All 8 multi-engine variables documented (ENGINES, ENGINE_DISTRIBUTION, ENGINE_WEIGHTS, etc.)
-   - Design constraints and solutions explained
-
-2. Feature Implementation Status
-   - CLI arguments: --engines and --engine-distribution (✅ Complete)
-   - YAML configuration support (✅ Complete)
-   - All core functions documented with code examples
-   - 4 distribution strategies: round-robin, weighted, random, fill-first
-
-3. Core Functions Documented
-   - validate_engines() - Engine validation and CLI checks
-   - get_engine_for_agent() - All 4 distribution strategies with code
-   - serialize_engine_config() / deserialize_engine_config() - Subshell communication
-   - record_agent_result() - Metrics aggregation per engine
-   - print_engine_summary() - Formatted statistics table
-   - deduplicate_engines() - Duplicate removal with weight summing
-
-4. Display & Reporting
-   - Dry-run output format
-   - Engine assignment preview table
-   - Live status display with engine names
-   - Per-agent result output examples
-
-5. Backward Compatibility
-   - Single engine mode compatibility verified
-   - Default engine behavior documented
-   - Tested scenarios listed
-
-6. Error Handling
-   - Improved error messages documented
-   - Examples of all error types
-
-7. Example Configurations
-   - examples/multi-engine-basic.yaml documented
-   - examples/multi-engine-weighted.yaml documented
-
-8. Implementation Deviations
-   - 5 minor deviations documented with impact assessment
-   - All deviations are implementation details only, no functional changes
-
-9. Testing & Validation
-   - 5 test categories documented as complete
-   - All test scenarios verified
-
-10. File Locations & References
-    - Key file paths and line numbers
-    - Cross-references to task list
-
-The specification document is comprehensive (250+ lines) and marks the entire multi-engine implementation as COMPLETE with only minor documentation tasks remaining (README merge).
-
-Key deviations noted:
-- Engine color function integrated inline vs separate function (no impact)
-- Status display uses inline monitoring vs extracted function (no impact)
-- Implementation spread across 34 agents for testing (no impact, better quality)
-- README section pending final merge (examples complete, CLI functional)
-
-All 59 tasks from multi-engine-sprints.md are marked complete with this documentation.
+These variables will support multi-engine distribution and tracking in parallel execution mode.
