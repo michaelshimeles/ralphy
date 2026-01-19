@@ -126,6 +126,77 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
+# Validate engines: check they're in VALID_ENGINES and CLI commands exist
+validate_engines() {
+  local -a valid_engines_list=()
+  local -a invalid_engines=()
+  local -a missing_cli_engines=()
+
+  # Map of engine names to their CLI commands
+  declare -A engine_cli_map=(
+    ["claude"]="claude"
+    ["opencode"]="opencode"
+    ["cursor"]="agent"
+    ["codex"]="codex"
+    ["qwen"]="qwen"
+    ["droid"]="droid"
+  )
+
+  # Check each engine in ENGINES
+  for engine in "${ENGINES[@]}"; do
+    # Check if engine is in VALID_ENGINES
+    local is_valid=false
+    for valid_engine in "${VALID_ENGINES[@]}"; do
+      if [[ "$engine" == "$valid_engine" ]]; then
+        is_valid=true
+        break
+      fi
+    done
+
+    if [[ "$is_valid" == false ]]; then
+      invalid_engines+=("$engine")
+      continue
+    fi
+
+    # Check if CLI command exists
+    local cli_cmd="${engine_cli_map[$engine]}"
+    if ! command -v "$cli_cmd" &>/dev/null; then
+      missing_cli_engines+=("$engine")
+      log_warn "Engine '$engine' selected but CLI command '$cli_cmd' not found in PATH"
+    else
+      valid_engines_list+=("$engine")
+    fi
+  done
+
+  # Report invalid engines
+  if [[ ${#invalid_engines[@]} -gt 0 ]]; then
+    log_error "Invalid engine(s): ${invalid_engines[*]}"
+    log_error "Valid engines are: ${VALID_ENGINES[*]}"
+    return 1
+  fi
+
+  # Warn about missing CLI commands
+  if [[ ${#missing_cli_engines[@]} -gt 0 ]]; then
+    log_warn "The following engines are unavailable due to missing CLI commands:"
+    for engine in "${missing_cli_engines[@]}"; do
+      local cli_cmd="${engine_cli_map[$engine]}"
+      log_warn "  - $engine: '$cli_cmd' not found (install hint: check engine documentation)"
+    done
+  fi
+
+  # Filter ENGINES to only available ones
+  if [[ ${#valid_engines_list[@]} -eq 0 ]]; then
+    log_error "No valid engines available. Please install at least one engine CLI."
+    return 1
+  fi
+
+  # Update ENGINES array with only valid engines
+  ENGINES=("${valid_engines_list[@]}")
+
+  log_debug "Validated engines: ${ENGINES[*]}"
+  return 0
+}
+
 # ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
