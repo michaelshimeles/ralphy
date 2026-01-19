@@ -1,38 +1,42 @@
-## Agent 9 Progress
+## Agent 11 Progress
 
 ### Completed Tasks
 
-1. Added multi-engine configuration variables (lines 87-96 in ralphy.sh):
-   - ENGINES array for storing engine names
-   - ENGINE_DISTRIBUTION for distribution strategy
-   - ENGINE_WEIGHTS associative array for weighted distribution
-   - ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES for tracking
-   - VALID_ENGINES array with supported engines
+1. Merged prerequisite work from agents 1-9:
+   - Multi-engine configuration variables
+   - CLI argument parsing for --engines and --engine-distribution
+   - Engine validation and serialization functions
+   - Base get_engine_for_agent() function with round-robin distribution
 
-2. Implemented get_engine_for_agent() function (lines 130-144 in ralphy.sh):
-   - Takes agent_num as parameter (0-based index)
-   - Returns engine name using round-robin distribution
-   - Formula: ENGINES[agent_num % engine_count]
-   - Falls back to AI_ENGINE default if ENGINES is empty
-   - Properly handles edge cases
+2. Implemented random distribution strategy in get_engine_for_agent() (lines 142-153 in ralphy.sh):
+   - Added case statement to handle different ENGINE_DISTRIBUTION values
+   - When ENGINE_DISTRIBUTION="random": uses RANDOM % engine_count
+   - When ENGINE_DISTRIBUTION="round-robin" (or default): uses agent_num % engine_count
+   - Maintains backward compatibility with round-robin as default
 
-3. Created comprehensive test suite (test_get_engine_for_agent.sh):
-   - Tests empty ENGINES array (should return default)
-   - Tests single engine (all agents get same engine)
-   - Tests two, three, and four engines with round-robin distribution
-   - Tests large agent numbers to verify modulo operation
-   - All 6 test cases pass successfully
+3. Created comprehensive test suite (test_random_distribution.sh):
+   - Test 1: Validates random distribution returns only valid engines (20 samples)
+   - Test 2: Verifies single engine works with random distribution
+   - Test 3: Confirms all engines are eventually selected (100 samples with 4 engines)
+   - Test 4: Tests switching between round-robin and random strategies
+   - Test 5: Verifies empty ENGINES array returns default AI_ENGINE
+   - All 5 test cases pass successfully
 
 ### Implementation Details
 
-The get_engine_for_agent() function implements round-robin distribution by:
-- Calculating engine_index = agent_num % engine_count
-- Returning the engine at that index from the ENGINES array
-- This ensures even distribution across all configured engines
-- Agent 0 gets ENGINES[0], agent 1 gets ENGINES[1], etc.
-- After reaching the last engine, it cycles back to the first
+The random distribution strategy:
+- Uses bash's built-in $RANDOM variable (0-32767 range)
+- Applies modulo operation: engine_index = RANDOM % engine_count
+- Each call to get_engine_for_agent() produces a new random selection
+- Provides non-deterministic engine assignment across agents
+- Useful for load balancing and avoiding patterns in engine usage
 
 ### Files Modified
 
-- ralphy.sh: Added multi-engine variables and get_engine_for_agent() function
-- test_get_engine_for_agent.sh: New test file with comprehensive test coverage
+- ralphy.sh: Enhanced get_engine_for_agent() with random distribution case
+- test_random_distribution.sh: New test file with comprehensive random distribution tests
+
+### Previous Agent Work (merged)
+
+- Agent 9: Base get_engine_for_agent() with round-robin
+- Agents 1-8: Multi-engine infrastructure, CLI parsing, validation, serialization

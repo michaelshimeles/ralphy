@@ -139,8 +139,19 @@ get_engine_for_agent() {
     return
   fi
 
-  # Round-robin distribution: agent_num % engine_count
-  local engine_index=$((agent_num % engine_count))
+  # Select distribution strategy
+  local engine_index
+  case "$ENGINE_DISTRIBUTION" in
+    random)
+      # Random distribution: use $RANDOM to pick an engine
+      engine_index=$((RANDOM % engine_count))
+      ;;
+    round-robin|*)
+      # Round-robin distribution (default): agent_num % engine_count
+      engine_index=$((agent_num % engine_count))
+      ;;
+  esac
+
   echo "${ENGINES[$engine_index]}"
 }
 
