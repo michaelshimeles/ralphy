@@ -1,0 +1,14 @@
+Implemented print_engine_summary() function and integrated it into the final report section.
+
+Changes made:
+1. Added print_engine_summary() function (lines 2695-2723) that:
+   - Only displays in parallel mode with multiple engines
+   - Shows configured engines as a placeholder
+   - Includes TODO comments for full implementation when task 47 is complete
+
+2. Called print_engine_summary() in show_summary() function (line 2779):
+   - Added after the "Branches Created" section
+   - Added before the final separator line
+   - Includes descriptive comment explaining when it displays
+
+This completes task 49 from multi-engine-sprints.md. The function is ready to be enhanced with full engine tracking metrics once task 47 (record_agent_result) is implemented.

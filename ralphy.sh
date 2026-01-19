@@ -2692,6 +2692,36 @@ Be careful to preserve functionality from BOTH branches. The goal is to integrat
 # SUMMARY
 # ============================================
 
+print_engine_summary() {
+  # Only display engine summary in parallel mode with multiple engines
+  # This function will be fully implemented when engine tracking is added (tasks 47-48)
+  if [[ "$PARALLEL" != true ]]; then
+    return 0
+  fi
+
+  # Check if ENGINES array exists and has multiple engines
+  if [[ -z "${ENGINES+x}" ]] || [[ ${#ENGINES[@]} -le 1 ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "${BOLD}>>> Engine Summary${RESET}"
+  echo "${DIM}(Multi-engine tracking will be available when task 47 is complete)${RESET}"
+
+  # Placeholder: Display configured engines
+  if [[ ${#ENGINES[@]} -gt 0 ]]; then
+    echo "Configured engines: ${ENGINES[*]}"
+  fi
+
+  # TODO: When task 47 is complete, display formatted table with:
+  # - Engine name (with color)
+  # - Agent count
+  # - Success count
+  # - Failed count
+  # - Total cost
+  # - Totals row
+}
+
 show_summary() {
   echo ""
   echo "${BOLD}============================================${RESET}"
@@ -2744,7 +2774,10 @@ show_summary() {
       echo "  - $branch"
     done
   fi
-  
+
+  # Show engine summary if in parallel mode with multiple engines
+  print_engine_summary
+
   echo "${BOLD}============================================${RESET}"
 }
 
