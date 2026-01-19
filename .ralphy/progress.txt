@@ -1,30 +1,55 @@
-## Agent 13 Progress
+Task: Initialize engine tracking arrays (ENGINE_AGENT_COUNT, ENGINE_SUCCESS, ENGINE_FAILURES, ENGINE_COSTS) at start of run_parallel_tasks() and call serialize_engine_config()
 
-### Task: Add engine assignment preview table to dry-run output
+Implementation Summary:
+======================
 
-**Implementation Details:**
+1. Added multi-engine configuration variables (lines 88-96):
+   - declare -a ENGINES=()
+   - ENGINE_DISTRIBUTION="round-robin"
+   - declare -A ENGINE_WEIGHTS=()
+   - declare -A ENGINE_AGENT_COUNT=()
+   - declare -A ENGINE_COSTS=()
+   - declare -A ENGINE_SUCCESS=()
+   - declare -A ENGINE_FAILURES=()
+   - declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)
 
-1. Added multi-engine infrastructure:
-   - Added ENGINES array, ENGINE_DISTRIBUTION, and ENGINE_WEIGHTS variables after line 86
-   - Implemented get_engine_for_agent() function with round-robin distribution strategy
-   - Added backward compatibility to populate ENGINES array with AI_ENGINE if empty
+2. Implemented serialize_engine_config() function (lines 129-143):
+   - Converts ENGINE_WEIGHTS associative array to serialized string
+   - Exports ENGINE_WEIGHTS_SERIALIZED and ENGINE_DISTRIBUTION as env vars
+   - Enables passing configuration to subshells (since bash associative arrays don't propagate)
+   - Format: "engine1:weight1,engine2:weight2,..."
 
-2. Implemented engine assignment preview table:
-   - Created print_engine_assignment_preview() function that displays first 10 tasks
-   - Shows agent number (1-indexed), assigned engine (color-coded), and task name
-   - Truncates long task names to 48 characters
-   - Displays summary for remaining tasks if more than 10
-   - Only shows preview when multiple engines are configured
+3. Implemented deserialize_engine_config() function (lines 145-156):
+   - Restores ENGINE_WEIGHTS from ENGINE_WEIGHTS_SERIALIZED env var
+   - Parses serialized format back into associative array
+   - Used in subshells to restore engine configuration
 
-3. Integration:
-   - Added preview table call in run_parallel_tasks() function
-   - Preview is shown when DRY_RUN is true or when multiple engines are configured
-   - Table appears after task collection and before batch processing begins
+4. Initialized engine tracking arrays in run_parallel_tasks() (lines 2194-2211):
+   - Declares global associative arrays for tracking:
+     * ENGINE_AGENT_COUNT: tracks number of agents per engine
+     * ENGINE_SUCCESS: tracks successful completions per engine
+     * ENGINE_FAILURES: tracks failed completions per engine
+     * ENGINE_COSTS: tracks accumulated costs per engine
+   - Initializes all counters to 0 for each engine in ENGINES array
+   - Calls serialize_engine_config() to prepare config for subshells
 
-**Files Modified:**
-- ralphy.sh: Lines 87-90 (multi-engine variables), Lines 2157-2247 (functions), Line 2301 (preview call), Line 2858 (backward compatibility)
+Technical Details:
+- Used declare -gA for global associative array declarations in function scope
+- Arrays are initialized at the start of run_parallel_tasks(), before spawning agents
+- Serialization handles empty ENGINE_WEIGHTS gracefully
+- Log debug statements added for troubleshooting
 
-**Testing:**
-- Created and ran test script to verify round-robin distribution
-- Confirmed agent numbers are 1-indexed and cycle correctly through engines
-- Verified table formatting and color coding for different engines
+Files Modified:
+- ralphy.sh: Added variables, functions, and initialization logic
+
+Testing Notes:
+- Syntax validated with bash -n ralphy.sh (passed)
+- Functions use bash 4+ features (associative arrays)
+- Implementation follows the pattern specified in multi-engine-sprints.md
+- Ready for integration with get_engine_for_agent() and run_parallel_agent()
+
+Next Steps (from task list):
+- Integrate engine into run_parallel_agent() as third parameter
+- Update call sites to pass get_engine_for_agent() result
+- Implement record_agent_result() to populate these tracking arrays
+- Implement print_engine_summary() to display the tracked data

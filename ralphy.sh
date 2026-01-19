@@ -2598,9 +2598,28 @@ print_engine_assignment_preview() {
 
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-  
+
+  # Initialize engine tracking arrays
+  declare -gA ENGINE_AGENT_COUNT=()
+  declare -gA ENGINE_SUCCESS=()
+  declare -gA ENGINE_FAILURES=()
+  declare -gA ENGINE_COSTS=()
+
+  # Initialize counters for all engines
+  if [[ ${#ENGINES[@]} -gt 0 ]]; then
+    for engine in "${ENGINES[@]}"; do
+      ENGINE_AGENT_COUNT["$engine"]=0
+      ENGINE_SUCCESS["$engine"]=0
+      ENGINE_FAILURES["$engine"]=0
+      ENGINE_COSTS["$engine"]="0"
+    done
+  fi
+
+  # Serialize engine configuration for subshells
+  serialize_engine_config
+
   local all_tasks=()
-  
+
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")
