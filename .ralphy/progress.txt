@@ -1,0 +1,33 @@
+## Agent 18 - Update status display format to show engine name
+
+### Changes Made:
+
+1. Added `get_engine_short_name()` helper function (ralphy.sh:120-128)
+   - Returns short engine name based on AI_ENGINE global variable
+   - Supports: claude, opencode, cursor, codex, qwen, droid
+
+2. Updated initial agent status display (ralphy.sh:2264)
+   - Changed format from "Agent N: status" to "Agent N (engine): status"
+   - Example: "Agent 1 (claude): Implement feature X"
+
+3. Updated final agent status display (ralphy.sh:2391)
+   - Changed format from "Agent N: status" to "Agent N (engine): status"
+   - Includes success/failure icon and branch info
+   - Example: "✓ Agent 1 (claude): Implement feature X [branch-name]"
+
+4. Updated failed agent log header (ralphy.sh:2395)
+   - Changed format from "Agent N log:" to "Agent N (engine) log:"
+   - Example: "┌─ Agent 1 (claude) log:"
+
+5. Created test suite (test_engine_display.sh)
+   - Tests all 6 supported engines plus unknown/default case
+   - All 7 tests passing
+
+### Files Modified:
+- ralphy.sh (3 display locations + 1 helper function)
+- test_engine_display.sh (new test file)
+
+### Testing:
+- Unit tests created and passing (7/7)
+- Function correctly returns engine names for all supported engines
+- Default case (unknown engine) correctly returns "claude"
