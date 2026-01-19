@@ -1959,7 +1959,8 @@ run_parallel_agent() {
   local log_file="$5"
   
   echo "setting up" > "$status_file"
-  
+  echo "engine=$AI_ENGINE" >> "$status_file"
+
   # Log setup info
   echo "Agent $agent_num starting for task: $task_name" >> "$log_file"
   echo "ORIGINAL_DIR=$ORIGINAL_DIR" >> "$log_file"
@@ -1977,13 +1978,15 @@ run_parallel_agent() {
   
   if [[ ! -d "$worktree_dir" ]]; then
     echo "failed" > "$status_file"
+    echo "engine=$AI_ENGINE" >> "$status_file"
     echo "ERROR: Worktree directory does not exist: $worktree_dir" >> "$log_file"
     echo "0 0" > "$output_file"
     return 1
   fi
-  
+
   echo "running" > "$status_file"
-  
+  echo "engine=$AI_ENGINE" >> "$status_file"
+
   # Copy PRD file to worktree from original directory
   if [[ "$PRD_SOURCE" == "markdown" ]] || [[ "$PRD_SOURCE" == "yaml" ]]; then
     cp "$ORIGINAL_DIR/$PRD_FILE" "$worktree_dir/" 2>/dev/null || true
@@ -2114,6 +2117,7 @@ Focus only on implementing: $task_name"
     if [[ "$commit_count" -eq 0 ]]; then
       echo "ERROR: No new commits created; treating task as failed." >> "$log_file"
       echo "failed" > "$status_file"
+      echo "engine=$AI_ENGINE" >> "$status_file"
       echo "0 0" > "$output_file"
       cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
       return 1
@@ -2135,6 +2139,7 @@ Focus only on implementing: $task_name"
     
     # Write success output
     echo "done" > "$status_file"
+    echo "engine=$AI_ENGINE" >> "$status_file"
     echo "$input_tokens $output_tokens $branch_name" > "$output_file"
     
     # Cleanup worktree (but keep branch)
@@ -2143,6 +2148,7 @@ Focus only on implementing: $task_name"
     return 0
   else
     echo "failed" > "$status_file"
+    echo "engine=$AI_ENGINE" >> "$status_file"
     echo "0 0" > "$output_file"
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
     return 1
@@ -2256,6 +2262,7 @@ run_parallel_tasks() {
         log_files+=("$log_file")
 
         echo "waiting" > "$status_file"
+        echo "engine=$AI_ENGINE" >> "$status_file"
 
         # Show initial status
         printf "  ${CYAN}◉${RESET} Agent %d: %s\n" "$agent_num" "${task:0:50}"
@@ -2285,7 +2292,8 @@ run_parallel_tasks() {
         for ((j = 0; j < batch_size; j++)); do
           local pid="${parallel_pids[$j]}"
           local status_file="${status_files[$j]}"
-          local status=$(cat "$status_file" 2>/dev/null || echo "waiting")
+          local status=$(head -n 1 "$status_file" 2>/dev/null || echo "waiting")
+          local engine=$(grep "^engine=" "$status_file" 2>/dev/null | cut -d= -f2)
 
           case "$status" in
             "setting up")

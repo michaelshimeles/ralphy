@@ -1,0 +1,36 @@
+## Task: Parse engine from status file in monitoring loop using grep for engine= line
+
+### Implementation Summary
+
+Modified the status file format and monitoring loop to support engine tracking:
+
+1. **Status File Format Enhancement**
+   - Extended status file format to include engine information on a second line
+   - Format: Line 1 contains status (waiting, setting up, running, done, failed)
+   - Format: Line 2 contains `engine=<engine_name>`
+
+2. **Status File Writes Updated**
+   - Added `echo "engine=$AI_ENGINE" >> "$status_file"` after all status writes in run_parallel_agent()
+   - Locations updated:
+     - Initial "setting up" status (line 1962)
+     - Worktree creation failure (line 1981)
+     - "running" status (line 1988)
+     - No commits failure (line 2120)
+     - Success "done" status (line 2142)
+     - Final "failed" status (line 2151)
+     - Initial "waiting" status in monitoring loop (line 2265)
+
+3. **Monitoring Loop Enhancement**
+   - Modified status parsing to read only the first line: `head -n 1 "$status_file"`
+   - Added engine parsing using grep: `grep "^engine=" "$status_file" | cut -d= -f2`
+   - Location: ralphy.sh lines 2295-2296
+
+### Technical Details
+
+The engine variable is now available in the monitoring loop for each agent, enabling future features like:
+- Displaying engine name alongside agent status
+- Color-coding status by engine
+- Tracking per-engine metrics
+
+### Files Modified
+- ralphy.sh: Updated status file format and monitoring loop parsing
