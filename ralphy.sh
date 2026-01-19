@@ -2777,63 +2777,9 @@ run_parallel_tasks() {
 
       echo ""
 
-      # Monitor progress with a spinner
-      local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-      local spin_idx=0
+      # Monitor progress with status display
       local start_time=$SECONDS
-
-      while true; do
-        # Check if all processes are done
-        local all_done=true
-        local setting_up=0
-        local running=0
-        local done_count=0
-        local failed_count=0
-
-        for ((j = 0; j < batch_size; j++)); do
-          local pid="${parallel_pids[$j]}"
-          local status_file="${status_files[$j]}"
-          local status=$(cat "$status_file" 2>/dev/null || echo "waiting")
-
-          case "$status" in
-            "setting up")
-              all_done=false
-              ((setting_up++)) || true
-              ;;
-            running)
-              all_done=false
-              ((running++)) || true
-              ;;
-            done)
-              ((done_count++)) || true
-              ;;
-            failed)
-              ((failed_count++)) || true
-              ;;
-            *)
-              # Check if process is still running
-              if kill -0 "$pid" 2>/dev/null; then
-                all_done=false
-              fi
-              ;;
-          esac
-        done
-
-        [[ "$all_done" == true ]] && break
-
-        # Update spinner
-        local elapsed=$((SECONDS - start_time))
-        local spin_char="${spinner_chars:$spin_idx:1}"
-        spin_idx=$(( (spin_idx + 1) % ${#spinner_chars} ))
-
-        printf "\r  ${CYAN}%s${RESET} Agents: ${BLUE}%d setup${RESET} | ${YELLOW}%d running${RESET} | ${GREEN}%d done${RESET} | ${RED}%d failed${RESET} | %02d:%02d " \
-          "$spin_char" "$setting_up" "$running" "$done_count" "$failed_count" $((elapsed / 60)) $((elapsed % 60))
-
-        sleep 0.3
-      done
-
-      # Clear the spinner line
-      printf "\r%100s\r" ""
+      display_agent_status parallel_pids status_files "$batch_size" "$start_time"
 
       # Wait for all processes to fully complete
       for pid in "${parallel_pids[@]}"; do
