@@ -44,6 +44,7 @@ PR_DRAFT=false
 # Parallel execution
 PARALLEL=false
 MAX_PARALLEL=3
+ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
 
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
@@ -732,6 +733,22 @@ parse_args() {
         ;;
       --max-parallel)
         MAX_PARALLEL="${2:-3}"
+        shift 2
+        ;;
+      --engine-distribution)
+        case "${2:-}" in
+          round-robin|weighted|random|fill-first)
+            ENGINE_DISTRIBUTION="$2"
+            ;;
+          "")
+            log_error "--engine-distribution requires an argument"
+            exit 1
+            ;;
+          *)
+            log_error "Invalid engine distribution: $2. Must be one of: round-robin, weighted, random, fill-first"
+            exit 1
+            ;;
+        esac
         shift 2
         ;;
       --branch-per-task)

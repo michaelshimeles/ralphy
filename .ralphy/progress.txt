@@ -1,0 +1,2 @@
+- [✓] 2026-01-19 13:11 - test
+- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
