@@ -1,41 +1,94 @@
-## Task: Modify engine flags to append to ENGINES array
+## Completed Tasks
 
-### Changes Made:
+### Add multi-engine configuration variables to ralphy.sh
 
-1. **Added multi-engine configuration variables** (ralphy.sh:88-96)
-   - Added ENGINES array to store multiple engines
-   - Added ENGINE_DISTRIBUTION variable (defaults to "round-robin")
-   - Added ENGINE_WEIGHTS associative array for weighted distribution
-   - Added ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES tracking arrays
-   - Added VALID_ENGINES array with valid engine names: claude, opencode, cursor, codex, qwen, droid
+Added multi-engine configuration variables to ralphy.sh after line 85:
+- ENGINES array for storing engines to use in rotation
+- ENGINE_DISTRIBUTION string for distribution pattern (e.g., "claude:2,opencode:1")
+- ENGINE_WEIGHTS associative array for weight/priority per engine
+- ENGINE_AGENT_COUNT associative array for number of agents per engine
+- ENGINE_COSTS associative array for total cost tracking per engine
+- ENGINE_SUCCESS associative array for success count per engine
+- ENGINE_FAILURES associative array for failure count per engine
+- VALID_ENGINES array containing: claude, opencode, cursor, codex, qwen, droid
 
-2. **Implemented append_engine() helper function** (ralphy.sh:679-697)
-   - Checks if engine already exists in ENGINES array
-   - Only appends if not already present (deduplication)
-   - Handles --cursor/--agent alias correctly (both add "cursor")
+These variables will support multi-engine distribution and tracking in parallel execution mode.
 
-3. **Modified all engine flags** (ralphy.sh:715-742)
-   - Changed --opencode, --claude, --cursor, --agent, --codex, --qwen, --droid flags
-   - Now call append_engine() instead of setting AI_ENGINE directly
-   - Maintains backward compatibility (AI_ENGINE still exists for single-engine mode)
-   - Both --cursor and --agent flags now append "cursor" to avoid duplicates
+### Add --engine-distribution CLI argument
 
-4. **Created comprehensive test suite** (test_engine_flags.sh)
-   - Tests single engine flag
-   - Tests multiple different engines
-   - Tests duplicate engine flags (deduplication)
-   - Tests --cursor/--agent alias deduplication
-   - Tests mixed scenarios with cursor aliases
-   - Tests all engines together
-   - All 8 tests passing
+- [✓] 2026-01-19 - Added --engine-distribution CLI argument in parse_args() that accepts round-robin, weighted, random, or fill-first values and sets ENGINE_DISTRIBUTION variable
 
-### Testing:
-- Ran test_engine_flags.sh: All 8 tests passed
-- Verified deduplication works correctly for --cursor/--agent alias
-- Verified duplicate flags are properly deduplicated
+### Implement --engines CLI argument parsing in parse_args()
 
-### Implementation Notes:
-- The append_engine() function ensures no duplicate engines in ENGINES array
-- --cursor and --agent are treated as aliases for the same engine "cursor"
-- This change prepares ralphy for multi-engine parallel execution
-- Backward compatibility maintained: AI_ENGINE variable still exists for future compatibility layer
+**Location:** ralphy.sh:712-748
+
+**What was implemented:**
+1. Added `ENGINES` array and `ENGINE_WEIGHTS` associative array variable declarations (lines 48-49)
+2. Implemented `--engines` argument parsing in parse_args() function (lines 712-748)
+
+**Features:**
+- Parses comma-separated list of engines into ENGINES array
+- Supports weight syntax: `engine:weight` (e.g., `claude:5`)
+- Validates that weights are positive integers (rejects zero and negative values)
+- Supports engine names without weights (defaults to weight of 1)
+- Allows alphanumeric engine names with hyphens and underscores
+- Provides clear error messages for invalid specifications
+
+**Examples:**
+- `--engines claude` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=1
+- `--engines claude:5` → ENGINES=(claude), ENGINE_WEIGHTS[claude]=5
+- `--engines claude:3,opencode,cursor:2` → ENGINES=(claude opencode cursor), ENGINE_WEIGHTS[claude]=3, ENGINE_WEIGHTS[opencode]=1, ENGINE_WEIGHTS[cursor]=2
+
+**Validation:**
+- Engine names must match pattern: `^[a-zA-Z0-9_-]+$`
+- Weight syntax must match pattern: `^([a-zA-Z0-9_-]+):([0-9]+)$`
+- Weights must be positive integers (> 0)
+- Invalid formats are rejected with error messages
+
+**Testing:**
+Created comprehensive test suite in test_engines_parsing.sh with 12 test cases:
+- Valid engine names (with/without hyphens/underscores)
+- Engine with weight syntax parsing
+- Comma-separated list splitting
+- Zero and negative weight rejection
+- Invalid format rejection
+- Special character rejection
+
+All tests passed successfully.
+
+### Add backward compatibility after argument parsing
+
+**Location:** ralphy.sh:879-890
+
+**What was implemented:**
+Added backward compatibility logic at the end of parse_args() function to maintain compatibility with existing single-engine usage patterns.
+
+**Logic:**
+1. If exactly one engine is specified in ENGINES array:
+   - Set AI_ENGINE to that engine for backward compatibility
+   - Ensures single-engine workflows continue to work seamlessly
+
+2. If no engines are specified (empty ENGINES array):
+   - Populate ENGINES array with the default AI_ENGINE value
+   - Set ENGINE_WEIGHTS for that engine to 1
+   - Ensures existing code that doesn't use --engines still works
+
+3. If multiple engines are specified:
+   - No backward compatibility modifications are applied
+   - AI_ENGINE and ENGINES remain as configured
+
+**Benefits:**
+- Maintains backward compatibility with existing scripts and workflows
+- Allows gradual migration to multi-engine support
+- Single-engine flags (--claude, --opencode, etc.) continue to work as before
+- Zero-engine scenarios default to claude engine
+
+**Testing:**
+Created comprehensive test suite in test_backward_compatibility.sh with 9 test cases:
+- No engines with default AI_ENGINE (claude)
+- No engines with custom AI_ENGINE (opencode)
+- Single engine specifications (cursor, opencode, droid, qwen, codex)
+- Multiple engines (2 and 3 engines) - verifies no modification
+- All tests validate both AI_ENGINE and ENGINES array state
+
+All tests passed successfully.
