@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration (for parallel execution)
+declare -a ENGINES=()                    # Array of enabled engines
+ENGINE_DISTRIBUTION="round-robin"        # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()             # Associative array: engine -> weight
+declare -A ENGINE_AGENT_COUNT=()         # Track agent count per engine
+declare -A ENGINE_COSTS=()               # Track costs per engine
+declare -A ENGINE_SUCCESS=()             # Track success count per engine
+declare -A ENGINE_FAILURES=()            # Track failure count per engine
+declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -114,6 +124,35 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Serialize engine configuration to environment variables for subshells
+# Bash associative arrays don't propagate to subshells, so we convert to env vars
+serialize_engine_config() {
+  local serialized=""
+  for engine in "${!ENGINE_WEIGHTS[@]}"; do
+    local weight="${ENGINE_WEIGHTS[$engine]}"
+    if [[ -n "$serialized" ]]; then
+      serialized="${serialized},"
+    fi
+    serialized="${serialized}${engine}:${weight}"
+  done
+  export ENGINE_WEIGHTS_SERIALIZED="$serialized"
+  export ENGINE_DISTRIBUTION
+  log_debug "Serialized engine config: ENGINE_WEIGHTS_SERIALIZED=$ENGINE_WEIGHTS_SERIALIZED"
+}
+
+# Deserialize engine configuration from environment variables in subshells
+deserialize_engine_config() {
+  if [[ -n "$ENGINE_WEIGHTS_SERIALIZED" ]]; then
+    declare -gA ENGINE_WEIGHTS=()
+    IFS=',' read -ra pairs <<< "$ENGINE_WEIGHTS_SERIALIZED"
+    for pair in "${pairs[@]}"; do
+      IFS=':' read -r engine weight <<< "$pair"
+      ENGINE_WEIGHTS["$engine"]="$weight"
+      log_debug "Deserialized: ENGINE_WEIGHTS[$engine]=$weight"
+    done
+  fi
 }
 
 # ============================================
@@ -2151,9 +2190,28 @@ Focus only on implementing: $task_name"
 
 run_parallel_tasks() {
   log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
-  
+
+  # Initialize engine tracking arrays
+  declare -gA ENGINE_AGENT_COUNT=()
+  declare -gA ENGINE_SUCCESS=()
+  declare -gA ENGINE_FAILURES=()
+  declare -gA ENGINE_COSTS=()
+
+  # Initialize counters for all engines
+  if [[ ${#ENGINES[@]} -gt 0 ]]; then
+    for engine in "${ENGINES[@]}"; do
+      ENGINE_AGENT_COUNT["$engine"]=0
+      ENGINE_SUCCESS["$engine"]=0
+      ENGINE_FAILURES["$engine"]=0
+      ENGINE_COSTS["$engine"]="0"
+    done
+  fi
+
+  # Serialize engine configuration for subshells
+  serialize_engine_config
+
   local all_tasks=()
-  
+
   # Get all pending tasks
   while IFS= read -r task; do
     [[ -n "$task" ]] && all_tasks+=("$task")

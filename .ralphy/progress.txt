@@ -1,0 +1,55 @@
+Task: Initialize engine tracking arrays (ENGINE_AGENT_COUNT, ENGINE_SUCCESS, ENGINE_FAILURES, ENGINE_COSTS) at start of run_parallel_tasks() and call serialize_engine_config()
+
+Implementation Summary:
+======================
+
+1. Added multi-engine configuration variables (lines 88-96):
+   - declare -a ENGINES=()
+   - ENGINE_DISTRIBUTION="round-robin"
+   - declare -A ENGINE_WEIGHTS=()
+   - declare -A ENGINE_AGENT_COUNT=()
+   - declare -A ENGINE_COSTS=()
+   - declare -A ENGINE_SUCCESS=()
+   - declare -A ENGINE_FAILURES=()
+   - declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)
+
+2. Implemented serialize_engine_config() function (lines 129-143):
+   - Converts ENGINE_WEIGHTS associative array to serialized string
+   - Exports ENGINE_WEIGHTS_SERIALIZED and ENGINE_DISTRIBUTION as env vars
+   - Enables passing configuration to subshells (since bash associative arrays don't propagate)
+   - Format: "engine1:weight1,engine2:weight2,..."
+
+3. Implemented deserialize_engine_config() function (lines 145-156):
+   - Restores ENGINE_WEIGHTS from ENGINE_WEIGHTS_SERIALIZED env var
+   - Parses serialized format back into associative array
+   - Used in subshells to restore engine configuration
+
+4. Initialized engine tracking arrays in run_parallel_tasks() (lines 2194-2211):
+   - Declares global associative arrays for tracking:
+     * ENGINE_AGENT_COUNT: tracks number of agents per engine
+     * ENGINE_SUCCESS: tracks successful completions per engine
+     * ENGINE_FAILURES: tracks failed completions per engine
+     * ENGINE_COSTS: tracks accumulated costs per engine
+   - Initializes all counters to 0 for each engine in ENGINES array
+   - Calls serialize_engine_config() to prepare config for subshells
+
+Technical Details:
+- Used declare -gA for global associative array declarations in function scope
+- Arrays are initialized at the start of run_parallel_tasks(), before spawning agents
+- Serialization handles empty ENGINE_WEIGHTS gracefully
+- Log debug statements added for troubleshooting
+
+Files Modified:
+- ralphy.sh: Added variables, functions, and initialization logic
+
+Testing Notes:
+- Syntax validated with bash -n ralphy.sh (passed)
+- Functions use bash 4+ features (associative arrays)
+- Implementation follows the pattern specified in multi-engine-sprints.md
+- Ready for integration with get_engine_for_agent() and run_parallel_agent()
+
+Next Steps (from task list):
+- Integrate engine into run_parallel_agent() as third parameter
+- Update call sites to pass get_engine_for_agent() result
+- Implement record_agent_result() to populate these tracking arrays
+- Implement print_engine_summary() to display the tracked data
