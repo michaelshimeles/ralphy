@@ -116,6 +116,20 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
 }
 
+# Get ANSI color code for engine
+get_engine_color() {
+  local engine="${1:-$AI_ENGINE}"
+  case "$engine" in
+    claude) echo "$BLUE" ;;
+    cursor) echo "$GREEN" ;;
+    opencode) echo "$YELLOW" ;;
+    codex) echo "$MAGENTA" ;;
+    qwen) echo "$CYAN" ;;
+    droid) echo "$RED" ;;
+    *) echo "$MAGENTA" ;;  # Default to magenta for unknown engines
+  esac
+}
+
 # ============================================
 # BROWNFIELD MODE (.ralphy/ configuration)
 # ============================================
@@ -2797,14 +2811,15 @@ main() {
     # Show brownfield banner
     echo "${BOLD}============================================${RESET}"
     echo "${BOLD}Ralphy${RESET} - Single Task Mode"
+    local engine_color=$(get_engine_color)
     local engine_display
     case "$AI_ENGINE" in
-      opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-      cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-      codex) engine_display="${BLUE}Codex${RESET}" ;;
-      qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-      droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-      *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
+      opencode) engine_display="${engine_color}OpenCode${RESET}" ;;
+      cursor) engine_display="${engine_color}Cursor Agent${RESET}" ;;
+      codex) engine_display="${engine_color}Codex${RESET}" ;;
+      qwen) engine_display="${engine_color}Qwen-Code${RESET}" ;;
+      droid) engine_display="${engine_color}Factory Droid${RESET}" ;;
+      *) engine_display="${engine_color}Claude Code${RESET}" ;;
     esac
     echo "Engine: $engine_display"
     if [[ -d "$RALPHY_DIR" ]]; then
@@ -2832,14 +2847,15 @@ main() {
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
+  local engine_color=$(get_engine_color)
   local engine_display
   case "$AI_ENGINE" in
-    opencode) engine_display="${CYAN}OpenCode${RESET}" ;;
-    cursor) engine_display="${YELLOW}Cursor Agent${RESET}" ;;
-    codex) engine_display="${BLUE}Codex${RESET}" ;;
-    qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
-    droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
-    *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
+    opencode) engine_display="${engine_color}OpenCode${RESET}" ;;
+    cursor) engine_display="${engine_color}Cursor Agent${RESET}" ;;
+    codex) engine_display="${engine_color}Codex${RESET}" ;;
+    qwen) engine_display="${engine_color}Qwen-Code${RESET}" ;;
+    droid) engine_display="${engine_color}Factory Droid${RESET}" ;;
+    *) engine_display="${engine_color}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
   echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"

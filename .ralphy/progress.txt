@@ -1,0 +1,32 @@
+Agent 19: Add get_engine_color() function
+==========================================
+
+Completed Tasks:
+1. Added get_engine_color() function in ralphy.sh (lines 119-131)
+   - Returns ANSI color codes for each engine:
+     * claude = blue
+     * cursor = green
+     * opencode = yellow
+     * codex = magenta
+     * qwen = cyan
+     * droid = red
+   - Accepts optional engine parameter or uses AI_ENGINE variable
+   - Returns magenta as default for unknown engines
+
+2. Applied get_engine_color() in display locations:
+   - Brownfield mode banner (line 2814)
+   - PRD mode banner (line 2850)
+   - Both locations now use dynamic color from function instead of hardcoded values
+
+3. Created comprehensive test suite (test_get_engine_color.sh):
+   - Tests all 6 engine color mappings
+   - Tests default case for unknown engines
+   - Tests AI_ENGINE variable usage
+   - All 8 tests pass successfully
+
+Technical Details:
+- Function follows existing pattern from ralphy.sh
+- Compatible with color detection system (lines 54-67)
+- Works with tput-based ANSI color codes
+- Maintains fallback for terminals without color support
+- No breaking changes to existing functionality
