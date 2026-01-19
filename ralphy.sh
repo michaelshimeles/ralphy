@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration
+declare -a ENGINES=()  # List of engines to use (populated from CLI or config)
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Weights for each engine (for weighted distribution)
+declare -A ENGINE_AGENT_COUNT=()  # Number of agents per engine
+declare -A ENGINE_COSTS=()  # Total cost per engine
+declare -A ENGINE_SUCCESS=()  # Success count per engine
+declare -A ENGINE_FAILURES=()  # Failure count per engine
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -710,6 +720,46 @@ parse_args() {
         AI_ENGINE="droid"
         shift
         ;;
+      --engines)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--engines requires a comma-separated list of engines"
+          log_info "Example: --engines claude:2,cursor:1"
+          exit 1
+        fi
+        # Parse comma-separated list
+        IFS=',' read -ra engine_list <<< "$2"
+        for engine_spec in "${engine_list[@]}"; do
+          # Trim whitespace
+          engine_spec=$(echo "$engine_spec" | xargs)
+
+          # Check for weight syntax (engine:weight)
+          if [[ "$engine_spec" =~ ^([a-z]+):([0-9]+)$ ]]; then
+            local engine="${BASH_REMATCH[1]}"
+            local weight="${BASH_REMATCH[2]}"
+
+            # Validate weight is positive
+            if [[ "$weight" -le 0 ]]; then
+              log_error "Invalid weight for engine '$engine': weights must be positive integers (got: $weight)"
+              log_info "Expected format: --engines engine:weight (e.g., claude:2,cursor:1)"
+              exit 1
+            fi
+
+            ENGINES+=("$engine")
+            ENGINE_WEIGHTS[$engine]="$weight"
+          elif [[ "$engine_spec" =~ ^[a-z]+$ ]]; then
+            # Just engine name, default weight 1
+            ENGINES+=("$engine_spec")
+            ENGINE_WEIGHTS[$engine_spec]="1"
+          else
+            log_error "Invalid engine specification: '$engine_spec'"
+            log_info "Expected format: --engines engine1:weight1,engine2:weight2"
+            log_info "Or: --engines engine1,engine2 (weights default to 1)"
+            log_info "Example: --engines claude:2,cursor:1"
+            exit 1
+          fi
+        done
+        shift 2
+        ;;
       --dry-run)
         DRY_RUN=true
         shift
@@ -814,6 +864,187 @@ parse_args() {
         ;;
     esac
   done
+}
+
+# ============================================
+# MULTI-ENGINE FUNCTIONS
+# ============================================
+
+# Deduplicate engines and sum their weights
+deduplicate_engines() {
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    return
+  fi
+
+  declare -A seen_engines=()
+  declare -A summed_weights=()
+  declare -a unique_engines=()
+  local has_duplicates=false
+
+  for engine in "${ENGINES[@]}"; do
+    if [[ -n "${seen_engines[$engine]:-}" ]]; then
+      # Duplicate found
+      has_duplicates=true
+      # Sum the weights
+      local current_weight="${ENGINE_WEIGHTS[$engine]:-1}"
+      summed_weights[$engine]=$((${summed_weights[$engine]:-0} + current_weight))
+    else
+      # First occurrence
+      seen_engines[$engine]=1
+      unique_engines+=("$engine")
+      summed_weights[$engine]="${ENGINE_WEIGHTS[$engine]:-1}"
+    fi
+  done
+
+  if [[ "$has_duplicates" == true ]]; then
+    log_warn "Duplicate engines found. Summing weights for duplicates."
+    # Update ENGINES array with unique engines
+    ENGINES=("${unique_engines[@]}")
+    # Update ENGINE_WEIGHTS with summed weights
+    for engine in "${unique_engines[@]}"; do
+      ENGINE_WEIGHTS[$engine]="${summed_weights[$engine]}"
+    done
+  fi
+}
+
+# Validate engines and filter to available ones
+validate_engines() {
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    return
+  fi
+
+  local -a invalid_engines=()
+  local -a missing_cli_engines=()
+  local -a valid_engines=()
+
+  # Check each engine
+  for engine in "${ENGINES[@]}"; do
+    # Check if engine is in VALID_ENGINES
+    local is_valid=false
+    for valid_engine in "${VALID_ENGINES[@]}"; do
+      if [[ "$engine" == "$valid_engine" ]]; then
+        is_valid=true
+        break
+      fi
+    done
+
+    if [[ "$is_valid" == false ]]; then
+      invalid_engines+=("$engine")
+      continue
+    fi
+
+    # Check if CLI is available
+    local cli_available=false
+    case "$engine" in
+      opencode)
+        if command -v opencode &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+      codex)
+        if command -v codex &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+      cursor)
+        if command -v agent &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+      qwen)
+        if command -v qwen &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+      droid)
+        if command -v droid &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+      claude)
+        if command -v claude &>/dev/null; then
+          cli_available=true
+        fi
+        ;;
+    esac
+
+    if [[ "$cli_available" == true ]]; then
+      valid_engines+=("$engine")
+    else
+      missing_cli_engines+=("$engine")
+    fi
+  done
+
+  # Report invalid engines
+  if [[ ${#invalid_engines[@]} -gt 0 ]]; then
+    log_error "Unknown engine(s): ${invalid_engines[*]}"
+    log_info "Valid engines are: ${VALID_ENGINES[*]}"
+    exit 1
+  fi
+
+  # Report missing CLIs
+  if [[ ${#missing_cli_engines[@]} -gt 0 ]]; then
+    for engine in "${missing_cli_engines[@]}"; do
+      case "$engine" in
+        opencode)
+          log_warn "OpenCode CLI not found. Install from: https://opencode.ai/docs/"
+          ;;
+        codex)
+          log_warn "Codex CLI not found. Make sure 'codex' is in your PATH."
+          ;;
+        cursor)
+          log_warn "Cursor agent CLI not found. Make sure Cursor is installed and 'agent' is in your PATH."
+          ;;
+        qwen)
+          log_warn "Qwen-Code CLI not found. Make sure 'qwen' is in your PATH."
+          ;;
+        droid)
+          log_warn "Factory Droid CLI not found. Install from: https://docs.factory.ai/cli/getting-started/quickstart"
+          ;;
+        claude)
+          log_warn "Claude Code CLI not found. Install from: https://github.com/anthropics/claude-code"
+          ;;
+      esac
+    done
+  fi
+
+  # Filter ENGINES to only valid ones
+  ENGINES=("${valid_engines[@]}")
+
+  # Check if any valid engines remain
+  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+    log_error "No valid engines available."
+    log_info ""
+    log_info "Possible solutions:"
+    log_info "  1. Install at least one AI engine CLI:"
+
+    for engine in "${VALID_ENGINES[@]}"; do
+      case "$engine" in
+        claude)
+          log_info "     - Claude Code: https://github.com/anthropics/claude-code"
+          ;;
+        opencode)
+          log_info "     - OpenCode: https://opencode.ai/docs/"
+          ;;
+        cursor)
+          log_info "     - Cursor: Install Cursor and ensure 'agent' is in PATH"
+          ;;
+        codex)
+          log_info "     - Codex: Ensure 'codex' is in your PATH"
+          ;;
+        qwen)
+          log_info "     - Qwen-Code: Ensure 'qwen' is in your PATH"
+          ;;
+        droid)
+          log_info "     - Factory Droid: https://docs.factory.ai/cli/getting-started/quickstart"
+          ;;
+      esac
+    done
+
+    log_info "  2. Verify the CLI is in your PATH"
+    log_info "  3. Try specifying a different engine with --claude, --cursor, etc."
+    exit 1
+  fi
 }
 
 # ============================================
@@ -2754,6 +2985,10 @@ show_summary() {
 
 main() {
   parse_args "$@"
+
+  # Process multi-engine configuration
+  deduplicate_engines
+  validate_engines
 
   # Handle --init mode
   if [[ "$INIT_MODE" == true ]]; then

@@ -1,0 +1,47 @@
+Improved error messages for multi-engine support:
+
+1. Unknown engine error - Now lists valid options
+   - Added VALID_ENGINES array with all supported engines
+   - validate_engines() checks against this list and shows valid options on error
+   - Error message format: "Unknown engine(s): <invalid> / Valid engines are: claude opencode cursor codex qwen droid"
+
+2. Invalid weight error - Shows expected format
+   - --engines argument parser validates weight format
+   - Checks weights are positive integers (> 0)
+   - Error messages:
+     * "Invalid weight for engine 'X': weights must be positive integers (got: Y)"
+     * "Expected format: --engines engine:weight (e.g., claude:2,cursor:1)"
+     * "Invalid engine specification: 'X'"
+     * Shows examples for proper format
+
+3. No valid engines error - Suggests solutions
+   - validate_engines() filters engines to only those with available CLIs
+   - If no engines remain after filtering, shows comprehensive error:
+     * "No valid engines available."
+     * Lists all valid engines with installation links
+     * Suggests verifying CLI is in PATH
+     * Suggests trying different engine flags
+
+4. Missing CLI error - Shows installation hints
+   - validate_engines() warns about missing CLIs with installation instructions
+   - Each engine has specific installation hint:
+     * Claude: https://github.com/anthropics/claude-code
+     * OpenCode: https://opencode.ai/docs/
+     * Cursor: Install Cursor and ensure 'agent' is in PATH
+     * Codex: Ensure 'codex' is in your PATH
+     * Qwen: Ensure 'qwen' is in your PATH
+     * Droid: https://docs.factory.ai/cli/getting-started/quickstart
+
+Implementation details:
+- Added multi-engine configuration variables (lines 88-96): ENGINES, ENGINE_DISTRIBUTION, ENGINE_WEIGHTS, ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES, VALID_ENGINES
+- Implemented deduplicate_engines() function (lines 833-867) to handle duplicate engine names
+- Implemented validate_engines() function (lines 870-1008) with improved error messages
+- Added --engines CLI argument parsing (lines 723-762) with weight validation
+- Added validate_engines() and deduplicate_engines() calls in main() (lines 2990-2991)
+- Created test_error_messages.sh to validate error message improvements
+
+Files modified:
+- ralphy.sh: Added multi-engine support and improved error messages
+- test_error_messages.sh: Created comprehensive test suite for error messages
+
+Note: Tests require bash 4+ for associative array support. Script syntax is valid.
