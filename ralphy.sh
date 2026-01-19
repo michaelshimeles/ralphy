@@ -46,10 +46,6 @@ PARALLEL=false
 MAX_PARALLEL=3
 ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
 
-# Multi-engine support
-declare -a ENGINES=()
-declare -A ENGINE_WEIGHTS=()
-
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
 PRD_FILE="PRD.md"
@@ -93,57 +89,14 @@ USE_BC_FOR_COSTS=false  # Flag to indicate if bc is available for cost calculati
 
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engines to use for parallel tasks
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
-declare -A ENGINE_WEIGHTS=()  # Associative array mapping engine name to weight
-declare -A ENGINE_AGENT_COUNT=()  # Count of agents assigned to each engine
-declare -A ENGINE_COSTS=()  # Total cost per engine
-declare -A ENGINE_SUCCESS=()  # Success count per engine
-declare -A ENGINE_FAILURES=()  # Failure count per engine
-declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
-
-# Engine-specific metrics tracking (associative arrays)
-declare -A ENGINE_AGENT_COUNT=()   # Total agents per engine
-declare -A ENGINE_SUCCESS=()       # Success count per engine
-declare -A ENGINE_FAILURES=()      # Failure count per engine
-declare -A ENGINE_COSTS=()         # Total cost per engine
-declare -A ENGINE_TOKENS_IN=()     # Total input tokens per engine
-declare -A ENGINE_TOKENS_OUT=()    # Total output tokens per engine
-declare -A ENGINE_DURATION_MS=()   # Total duration per engine (for engines that report it)
-
-# Multi-engine tracking (for parallel execution with multiple engines)
-declare -A ENGINE_AGENT_COUNT=()  # Number of agents per engine
-declare -A ENGINE_SUCCESS=()      # Success count per engine
-declare -A ENGINE_FAILURES=()     # Failure count per engine
-declare -A ENGINE_COSTS=()        # Total cost per engine
-
-# Multi-engine configuration
-declare -a ENGINES=()  # Array of engine names to use for parallel execution
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
-declare -A ENGINE_WEIGHTS=()  # Associative array: engine name -> weight
-declare -A ENGINE_AGENT_COUNT=()  # Associative array: engine name -> agent count
-declare -A ENGINE_COSTS=()  # Associative array: engine name -> total cost
-declare -A ENGINE_SUCCESS=()  # Associative array: engine name -> success count
-declare -A ENGINE_FAILURES=()  # Associative array: engine name -> failure count
-declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
-
-# Multi-engine parallel execution
-declare -a ENGINES=()  # List of engines to use for parallel tasks
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
-declare -A ENGINE_WEIGHTS=()  # Weights for weighted distribution (engine_name => weight)
-declare -A ENGINE_AGENT_COUNT=()  # Track number of agents per engine
-declare -A ENGINE_COSTS=()  # Track costs per engine
-declare -A ENGINE_SUCCESS=()  # Track successful tasks per engine
-declare -A ENGINE_FAILURES=()  # Track failed tasks per engine
-declare -a VALID_ENGINES=(claude opencode cursor codex qwen droid)  # Supported engines
-
-# Multi-engine configuration
-declare -a ENGINES=()  # List of engines to use (populated from CLI or config)
-ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
 declare -A ENGINE_WEIGHTS=()  # Weights for each engine (for weighted distribution)
 declare -A ENGINE_AGENT_COUNT=()  # Number of agents per engine
 declare -A ENGINE_COSTS=()  # Total cost per engine
 declare -A ENGINE_SUCCESS=()  # Success count per engine
 declare -A ENGINE_FAILURES=()  # Failure count per engine
+declare -A ENGINE_TOKENS_IN=()  # Total input tokens per engine
+declare -A ENGINE_TOKENS_OUT=()  # Total output tokens per engine
+declare -A ENGINE_DURATION_MS=()  # Total duration per engine (for engines that report it)
 declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")
 
 # ============================================
@@ -175,77 +128,6 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
-}
-
-# Validate engines: check they're in VALID_ENGINES and CLI commands exist
-validate_engines() {
-  local -a valid_engines_list=()
-  local -a invalid_engines=()
-  local -a missing_cli_engines=()
-
-  # Map of engine names to their CLI commands
-  declare -A engine_cli_map=(
-    ["claude"]="claude"
-    ["opencode"]="opencode"
-    ["cursor"]="agent"
-    ["codex"]="codex"
-    ["qwen"]="qwen"
-    ["droid"]="droid"
-  )
-
-  # Check each engine in ENGINES
-  for engine in "${ENGINES[@]}"; do
-    # Check if engine is in VALID_ENGINES
-    local is_valid=false
-    for valid_engine in "${VALID_ENGINES[@]}"; do
-      if [[ "$engine" == "$valid_engine" ]]; then
-        is_valid=true
-        break
-      fi
-    done
-
-    if [[ "$is_valid" == false ]]; then
-      invalid_engines+=("$engine")
-      continue
-    fi
-
-    # Check if CLI command exists
-    local cli_cmd="${engine_cli_map[$engine]}"
-    if ! command -v "$cli_cmd" &>/dev/null; then
-      missing_cli_engines+=("$engine")
-      log_warn "Engine '$engine' selected but CLI command '$cli_cmd' not found in PATH"
-    else
-      valid_engines_list+=("$engine")
-    fi
-  done
-
-  # Report invalid engines
-  if [[ ${#invalid_engines[@]} -gt 0 ]]; then
-    log_error "Invalid engine(s): ${invalid_engines[*]}"
-    log_error "Valid engines are: ${VALID_ENGINES[*]}"
-    return 1
-  fi
-
-  # Warn about missing CLI commands
-  if [[ ${#missing_cli_engines[@]} -gt 0 ]]; then
-    log_warn "The following engines are unavailable due to missing CLI commands:"
-    for engine in "${missing_cli_engines[@]}"; do
-      local cli_cmd="${engine_cli_map[$engine]}"
-      log_warn "  - $engine: '$cli_cmd' not found (install hint: check engine documentation)"
-    done
-  fi
-
-  # Filter ENGINES to only available ones
-  if [[ ${#valid_engines_list[@]} -eq 0 ]]; then
-    log_error "No valid engines available. Please install at least one engine CLI."
-    return 1
-  fi
-
-  # Update ENGINES array with only valid engines
-  ENGINES=("${valid_engines_list[@]}")
-
-  log_debug "Validated engines: ${ENGINES[*]}"
-  return 0
 }
 
 # ============================================
@@ -2705,33 +2587,6 @@ run_single_task() {
 # PARALLEL TASK EXECUTION
 # ============================================
 
-# Get engine for a specific agent number
-# Returns the appropriate engine based on distribution strategy
-# Falls back to AI_ENGINE if ENGINES array is not set
-get_engine_for_agent() {
-  local agent_num="$1"
-
-  # If ENGINES array is not set or empty, use default AI_ENGINE
-  if [[ -z "${ENGINES[*]}" ]]; then
-    echo "${AI_ENGINE:-claude}"
-    return 0
-  fi
-
-  # For now, implement simple round-robin distribution
-  # More advanced distribution strategies will be added later
-  local engine_count=${#ENGINES[@]}
-  local engine_index=$((agent_num % engine_count))
-  echo "${ENGINES[$engine_index]}"
-}
-
-# Deserialize engine configuration from environment variables
-# This allows engine config to be passed to subshells
-deserialize_engine_config() {
-  # Stub implementation - will be enhanced when serialize_engine_config() is implemented
-  # For now, this is a no-op placeholder
-  :
-}
-
 # Create an isolated worktree for a parallel agent
 create_agent_worktree() {
   local task_name="$1"
@@ -3068,42 +2923,6 @@ Focus only on implementing: $task_name"
     cleanup_agent_worktree "$worktree_dir" "$branch_name" "$log_file"
     return 1
   fi
-}
-
-# Get engine for a given agent number
-# Args: agent_num (1-indexed)
-# Returns: engine name
-get_engine_for_agent() {
-  local agent_num=$1
-
-  # If no engines configured or only one engine, use AI_ENGINE
-  if [[ ${#ENGINES[@]} -eq 0 ]]; then
-    echo "$AI_ENGINE"
-    return 0
-  fi
-
-  if [[ ${#ENGINES[@]} -eq 1 ]]; then
-    echo "${ENGINES[0]}"
-    return 0
-  fi
-
-  # Distribution strategies
-  local engine_count=${#ENGINES[@]}
-  # Convert 1-indexed agent_num to 0-indexed for array access
-  local zero_based=$((agent_num - 1))
-
-  case "$ENGINE_DISTRIBUTION" in
-    round-robin)
-      # Simple round-robin: cycle through engines
-      local idx=$((zero_based % engine_count))
-      echo "${ENGINES[$idx]}"
-      ;;
-    *)
-      # Default to round-robin
-      local idx=$((zero_based % engine_count))
-      echo "${ENGINES[$idx]}"
-      ;;
-  esac
 }
 
 # Display engine assignment preview table for first 10 tasks
@@ -3688,36 +3507,6 @@ Be careful to preserve functionality from BOTH branches. The goal is to integrat
 # ============================================
 # SUMMARY
 # ============================================
-
-print_engine_summary() {
-  # Only display engine summary in parallel mode with multiple engines
-  # This function will be fully implemented when engine tracking is added (tasks 47-48)
-  if [[ "$PARALLEL" != true ]]; then
-    return 0
-  fi
-
-  # Check if ENGINES array exists and has multiple engines
-  if [[ -z "${ENGINES+x}" ]] || [[ ${#ENGINES[@]} -le 1 ]]; then
-    return 0
-  fi
-
-  echo ""
-  echo "${BOLD}>>> Engine Summary${RESET}"
-  echo "${DIM}(Multi-engine tracking will be available when task 47 is complete)${RESET}"
-
-  # Placeholder: Display configured engines
-  if [[ ${#ENGINES[@]} -gt 0 ]]; then
-    echo "Configured engines: ${ENGINES[*]}"
-  fi
-
-  # TODO: When task 47 is complete, display formatted table with:
-  # - Engine name (with color)
-  # - Agent count
-  # - Success count
-  # - Failed count
-  # - Total cost
-  # - Totals row
-}
 
 show_summary() {
   echo ""
