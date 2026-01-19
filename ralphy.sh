@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration
+declare -a ENGINES=()  # Array of engines to use for parallel tasks
+ENGINE_DISTRIBUTION="round-robin"  # Distribution strategy: round-robin, weighted, random, fill-first
+declare -A ENGINE_WEIGHTS=()  # Associative array mapping engine name to weight
+declare -A ENGINE_AGENT_COUNT=()  # Count of agents assigned to each engine
+declare -A ENGINE_COSTS=()  # Total cost per engine
+declare -A ENGINE_SUCCESS=()  # Success count per engine
+declare -A ENGINE_FAILURES=()  # Failure count per engine
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")  # Valid engine names
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
@@ -666,6 +676,26 @@ show_version() {
 # ARGUMENT PARSING
 # ============================================
 
+# Helper function to append an engine to ENGINES array with deduplication
+# For --cursor/--agent alias, both add "cursor" to avoid duplicates
+append_engine() {
+  local engine="$1"
+
+  # Check if engine already exists in ENGINES array
+  local exists=false
+  for e in "${ENGINES[@]}"; do
+    if [[ "$e" == "$engine" ]]; then
+      exists=true
+      break
+    fi
+  done
+
+  # Only append if not already present
+  if [[ "$exists" == false ]]; then
+    ENGINES+=("$engine")
+  fi
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -683,11 +713,11 @@ parse_args() {
         shift
         ;;
       --opencode)
-        AI_ENGINE="opencode"
+        append_engine "opencode"
         shift
         ;;
       --claude)
-        AI_ENGINE="claude"
+        append_engine "claude"
         shift
         ;;
       --sonnet)
@@ -695,19 +725,19 @@ parse_args() {
         shift
         ;;
       --cursor|--agent)
-        AI_ENGINE="cursor"
+        append_engine "cursor"
         shift
         ;;
       --codex)
-        AI_ENGINE="codex"
+        append_engine "codex"
         shift
         ;;
       --qwen)
-        AI_ENGINE="qwen"
+        append_engine "qwen"
         shift
         ;;
       --droid)
-        AI_ENGINE="droid"
+        append_engine "droid"
         shift
         ;;
       --dry-run)

@@ -1,0 +1,41 @@
+## Task: Modify engine flags to append to ENGINES array
+
+### Changes Made:
+
+1. **Added multi-engine configuration variables** (ralphy.sh:88-96)
+   - Added ENGINES array to store multiple engines
+   - Added ENGINE_DISTRIBUTION variable (defaults to "round-robin")
+   - Added ENGINE_WEIGHTS associative array for weighted distribution
+   - Added ENGINE_AGENT_COUNT, ENGINE_COSTS, ENGINE_SUCCESS, ENGINE_FAILURES tracking arrays
+   - Added VALID_ENGINES array with valid engine names: claude, opencode, cursor, codex, qwen, droid
+
+2. **Implemented append_engine() helper function** (ralphy.sh:679-697)
+   - Checks if engine already exists in ENGINES array
+   - Only appends if not already present (deduplication)
+   - Handles --cursor/--agent alias correctly (both add "cursor")
+
+3. **Modified all engine flags** (ralphy.sh:715-742)
+   - Changed --opencode, --claude, --cursor, --agent, --codex, --qwen, --droid flags
+   - Now call append_engine() instead of setting AI_ENGINE directly
+   - Maintains backward compatibility (AI_ENGINE still exists for single-engine mode)
+   - Both --cursor and --agent flags now append "cursor" to avoid duplicates
+
+4. **Created comprehensive test suite** (test_engine_flags.sh)
+   - Tests single engine flag
+   - Tests multiple different engines
+   - Tests duplicate engine flags (deduplication)
+   - Tests --cursor/--agent alias deduplication
+   - Tests mixed scenarios with cursor aliases
+   - Tests all engines together
+   - All 8 tests passing
+
+### Testing:
+- Ran test_engine_flags.sh: All 8 tests passed
+- Verified deduplication works correctly for --cursor/--agent alias
+- Verified duplicate flags are properly deduplicated
+
+### Implementation Notes:
+- The append_engine() function ensures no duplicate engines in ENGINES array
+- --cursor and --agent are treated as aliases for the same engine "cursor"
+- This change prepares ralphy for multi-engine parallel execution
+- Backward compatibility maintained: AI_ENGINE variable still exists for future compatibility layer
