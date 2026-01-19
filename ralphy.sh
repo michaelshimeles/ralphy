@@ -85,6 +85,16 @@ WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
 
+# Multi-engine configuration
+declare -a ENGINES=()  # Array of engines to use in rotation
+ENGINE_DISTRIBUTION=""  # Distribution pattern (e.g., "claude:2,opencode:1")
+declare -A ENGINE_WEIGHTS=()  # Weight/priority for each engine
+declare -A ENGINE_AGENT_COUNT=()  # Number of agents assigned to each engine
+declare -A ENGINE_COSTS=()  # Total cost per engine
+declare -A ENGINE_SUCCESS=()  # Success count per engine
+declare -A ENGINE_FAILURES=()  # Failure count per engine
+declare -a VALID_ENGINES=("claude" "opencode" "cursor" "codex" "qwen" "droid")
+
 # ============================================
 # UTILITY FUNCTIONS
 # ============================================
