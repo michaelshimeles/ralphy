@@ -1,7 +1,10 @@
 #!/bin/bash
 # Test script for get_engine_color() function
+#
+# Note: Function and color definitions are intentionally duplicated inline
+# rather than sourced from ralphy.sh for test isolation and robustness.
 
-# Source color definitions and function
+# Color definitions (inline for test isolation)
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
   RED=$(tput setaf 1)
   GREEN=$(tput setaf 2)
@@ -14,7 +17,7 @@ else
   RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN="" RESET=""
 fi
 
-# Import the function from ralphy.sh
+# Function definition (inline for test isolation)
 get_engine_color() {
   local engine="${1:-$AI_ENGINE}"
   case "$engine" in
