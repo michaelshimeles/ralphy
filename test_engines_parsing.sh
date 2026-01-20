@@ -124,7 +124,7 @@ fi
 # Test 10: Comma-separated list splitting
 echo -e "\nTest 10: Splitting comma-separated list"
 engines_arg="claude,opencode:3,cursor"
-IFS=',' read -ra engines_array <<< "$engines_arg"
+IFS=',' read -ra engines_array <<< "$engines_arg"; IFS=$' \t\n'
 if [[ "${#engines_array[@]}" -eq 3 ]]; then
   if [[ "${engines_array[0]}" == "claude" && \
         "${engines_array[1]}" == "opencode:3" && \
