@@ -78,6 +78,7 @@ Rules apply to all tasks (single or PRD).
 
 ## AI Engines
 
+**Single engine:**
 ```bash
 ralphy              # Claude Code (default)
 ralphy --opencode   # OpenCode
@@ -86,6 +87,48 @@ ralphy --codex      # Codex
 ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ```
+
+**Multi-engine** - distribute tasks across multiple engines:
+
+```bash
+# Use Claude and Cursor in round-robin
+./ralphy.sh --parallel --engines claude,cursor
+
+# Weighted distribution (Claude gets 70%, Cursor gets 30%)
+./ralphy.sh --parallel --engines claude:7,cursor:3
+
+# Different distribution strategies
+./ralphy.sh --parallel --engines claude,cursor --engine-distribution round-robin  # alternate
+./ralphy.sh --parallel --engines claude,cursor --engine-distribution fill-first   # fill Claude first
+./ralphy.sh --parallel --engines claude,cursor --engine-distribution random       # random assignment
+./ralphy.sh --parallel --engines claude:7,cursor:3 --engine-distribution weighted # use weights
+```
+
+**Config file:**
+```yaml
+# .ralphy/config.yaml
+parallel:
+  engines:
+    - name: claude
+      weight: 7
+    - name: cursor
+      weight: 3
+  distribution: weighted  # round-robin, weighted, fill-first, random
+  max_concurrent: 5
+```
+
+Then run: `./ralphy.sh --parallel`
+
+**Distribution strategies:**
+- `round-robin` - cycles through engines (Agent 1→claude, 2→cursor, 3→claude...)
+- `weighted` - respects weight ratios (7:3 = 70% claude, 30% cursor)
+- `fill-first` - fills first engine before using next
+- `random` - random selection from available engines
+
+**Weight syntax:**
+- `--engines claude,cursor` - equal distribution (weight 1 each)
+- `--engines claude:7,cursor:3` - weighted (70% claude, 30% cursor)
+- Weights can be any positive integers, interpreted as ratios
 
 ## Task Sources
 
@@ -195,6 +238,8 @@ capabilities:
 | `--github-label TAG` | filter issues by label |
 | `--parallel` | run parallel |
 | `--max-parallel N` | max agents (default: 3) |
+| `--engines LIST` | comma-separated engines with optional weights (e.g., `claude:7,cursor:3`) |
+| `--engine-distribution TYPE` | distribution strategy: `round-robin`, `weighted`, `fill-first`, `random` |
 | `--branch-per-task` | branch per task |
 | `--base-branch NAME` | base branch |
 | `--create-pr` | create PRs |

@@ -1,0 +1,25 @@
+# Multi-Engine Basic Configuration
+# Simple round-robin distribution between Claude and OpenCode
+
+parallel:
+  engines:
+    - name: claude
+      weight: 1
+    - name: opencode
+      weight: 1
+  distribution: round-robin
+  max_concurrent: 3
+
+tasks:
+  - title: Create User model
+    completed: false
+  - title: Create Post model
+    completed: false
+  - title: Add user authentication
+    completed: false
+  - title: Build API endpoints
+    completed: false
+  - title: Add database migrations
+    completed: false
+  - title: Write unit tests
+    completed: false
