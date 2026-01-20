@@ -51,12 +51,13 @@ else
   exit 1
 fi
 
-# Check that expand_engines_by_weight is called in weighted case
+# Check that expand_engines_by_weight is called within the weighted distribution case
 echo "✓ Checking that expand_engines_by_weight is called in weighted strategy..."
-if grep -q "expand_engines_by_weight" ralphy.sh; then
-  echo "  Confirmed expand_engines_by_weight is called"
+# Look for expand_engines_by_weight being called between "weighted")" and the next ";;"
+if grep -A 20 '"weighted")' ralphy.sh | grep -q "expand_engines_by_weight"; then
+  echo "  Confirmed expand_engines_by_weight is called within weighted case"
 else
-  echo "  Error: expand_engines_by_weight not called in weighted case"
+  echo "  Error: expand_engines_by_weight not called within weighted distribution case"
   exit 1
 fi
 
