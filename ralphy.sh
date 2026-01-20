@@ -45,6 +45,7 @@ PR_DRAFT=false
 PARALLEL=false
 MAX_PARALLEL=3
 ENGINE_DISTRIBUTION="round-robin"  # round-robin, weighted, random, or fill-first
+MULTI_ENGINE=false  # Auto-detect and use all available engines
 
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
@@ -82,6 +83,7 @@ retry_count=0
 declare -a parallel_pids=()
 declare -a task_branches=()
 declare -a integration_branches=()  # Track integration branches for cleanup on interrupt
+declare -a POOL_COMPLETED_BRANCHES=()  # Branches completed by worker pool
 WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 ORIGINAL_DIR=""   # Original working directory (for worktree operations)
 ORIGINAL_BASE_BRANCH=""  # Original base branch before integration branches
@@ -89,6 +91,7 @@ USE_BC_FOR_COSTS=false  # Flag to indicate if bc is available for cost calculati
 
 # Multi-engine configuration
 declare -a ENGINES=()  # Array of engines to use for parallel tasks
+declare -a EXPANDED_ENGINES=()  # Expanded array for weighted distribution
 declare -A ENGINE_WEIGHTS=()  # Weights for each engine (for weighted distribution)
 declare -A ENGINE_AGENT_COUNT=()  # Number of agents per engine
 declare -A ENGINE_COSTS=()  # Total cost per engine
@@ -304,6 +307,78 @@ deserialize_engine_config() {
 # ============================================
 # MULTI-ENGINE FUNCTIONS
 # ============================================
+
+# Detect all available AI engines on the system
+# Returns: space-separated list of available engine names
+detect_available_engines() {
+  local available=()
+
+  # Check each known engine
+  if command -v claude &>/dev/null; then
+    available+=("claude")
+  fi
+
+  if command -v opencode &>/dev/null; then
+    available+=("opencode")
+  fi
+
+  if command -v agent &>/dev/null; then
+    available+=("cursor")
+  fi
+
+  if command -v codex &>/dev/null; then
+    available+=("codex")
+  fi
+
+  if command -v qwen &>/dev/null; then
+    available+=("qwen")
+  fi
+
+  if command -v droid &>/dev/null; then
+    available+=("droid")
+  fi
+
+  echo "${available[*]}"
+}
+
+# Print detected engines in a user-friendly format
+print_detected_engines() {
+  local engines_str
+  engines_str=$(detect_available_engines)
+
+  if [[ -z "$engines_str" ]]; then
+    log_warn "No AI engines detected on this system"
+    return 1
+  fi
+
+  local engines=($engines_str)
+  local count=${#engines[@]}
+
+  echo ""
+  echo "${BOLD}Detected AI Engines:${RESET}"
+  echo "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+  for engine in "${engines[@]}"; do
+    local icon=""
+    local description=""
+    case "$engine" in
+      claude)    icon="${CYAN}◆${RESET}"; description="Claude Code (Anthropic)" ;;
+      opencode)  icon="${GREEN}◆${RESET}"; description="OpenCode CLI" ;;
+      cursor)    icon="${MAGENTA}◆${RESET}"; description="Cursor Agent" ;;
+      codex)     icon="${YELLOW}◆${RESET}"; description="OpenAI Codex CLI" ;;
+      qwen)      icon="${BLUE}◆${RESET}"; description="Qwen-Code" ;;
+      droid)     icon="${RED}◆${RESET}"; description="Factory Droid" ;;
+      *)         icon="◆"; description="$engine" ;;
+    esac
+    printf "  %s %-12s %s\n" "$icon" "$engine" "${DIM}$description${RESET}"
+  done
+
+  echo "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo "${DIM}Total: $count engine(s) available${RESET}"
+  echo ""
+
+  return 0
+}
 
 # Expand engines array based on weights for weighted distribution
 # This creates an array where each engine appears N times based on its weight
@@ -948,6 +1023,8 @@ ${BOLD}PARALLEL EXECUTION:${RESET}
   --max-parallel N    Max concurrent tasks (default: 3)
 
 ${BOLD}MULTI-ENGINE OPTIONS:${RESET}
+  --multi-engine      Auto-detect and use all available AI engines (implies --parallel)
+  --detect-engines    Show detected engines and exit (useful for checking what's available)
   --engines LIST      Comma-separated list of engines to use with optional weights
                       Format: engine1:weight1,engine2:weight2,...
                       Example: --engines claude:3,cursor:1,opencode:2
@@ -991,6 +1068,8 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
 
   # Multi-engine parallel execution
+  ./ralphy.sh --multi-engine               # Auto-detect and use all available engines
+  ./ralphy.sh --detect-engines             # Show which engines are available
   ./ralphy.sh --parallel --engines claude,cursor,opencode
                                            # Use 3 engines with round-robin
   ./ralphy.sh --parallel --engines claude:5,cursor:1 --engine-distribution weighted
@@ -1145,6 +1224,15 @@ parse_args() {
             ;;
         esac
         shift 2
+        ;;
+      --multi-engine)
+        MULTI_ENGINE=true
+        PARALLEL=true  # Multi-engine implies parallel mode
+        shift
+        ;;
+      --detect-engines)
+        print_detected_engines
+        exit 0
         ;;
       --branch-per-task)
         BRANCH_PER_TASK=true
@@ -2587,6 +2675,369 @@ run_single_task() {
 # PARALLEL TASK EXECUTION
 # ============================================
 
+# Task queue file paths (set during init)
+TASK_QUEUE_FILE=""
+TASK_QUEUE_LOCK=""
+ENGINE_COUNTER_FILE=""
+RESULTS_DIR=""
+
+# Initialize task queue for worker pool
+# Creates a file-based queue that workers can atomically claim from
+task_queue_init() {
+  local -n _queue_tasks=$1
+
+  TASK_QUEUE_FILE=$(mktemp)
+  TASK_QUEUE_LOCK=$(mktemp)
+  ENGINE_COUNTER_FILE=$(mktemp)
+  RESULTS_DIR=$(mktemp -d)
+
+  export TASK_QUEUE_FILE TASK_QUEUE_LOCK ENGINE_COUNTER_FILE RESULTS_DIR
+
+  # Write tasks to queue file (one per line)
+  printf '%s\n' "${_queue_tasks[@]}" > "$TASK_QUEUE_FILE"
+
+  # Initialize engine counter for round-robin
+  echo "0" > "$ENGINE_COUNTER_FILE"
+
+  log_debug "Task queue initialized: $TASK_QUEUE_FILE (${#_queue_tasks[@]} tasks)"
+}
+
+# Portable lock acquire using mkdir (atomic on POSIX)
+# Usage: acquire_lock <lock_dir>
+acquire_lock() {
+  local lock_dir="$1"
+  local max_attempts=100
+  local attempt=0
+
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    ((attempt++))
+    if [[ $attempt -ge $max_attempts ]]; then
+      return 1  # Failed to acquire lock
+    fi
+    # Small random sleep to reduce contention
+    sleep 0.$((RANDOM % 10))
+  done
+  return 0
+}
+
+# Release lock
+# Usage: release_lock <lock_dir>
+release_lock() {
+  rmdir "$1" 2>/dev/null || true
+}
+
+# Atomically claim next task from queue
+# Returns: task string on stdout, exit 0 if task claimed, exit 1 if queue empty
+task_queue_claim() {
+  local lock_dir="${TASK_QUEUE_LOCK}.dir"
+
+  # Acquire lock
+  if ! acquire_lock "$lock_dir"; then
+    return 1
+  fi
+
+  # Read first line (next task)
+  local task
+  task=$(head -n 1 "$TASK_QUEUE_FILE" 2>/dev/null || true)
+
+  if [[ -z "$task" ]]; then
+    release_lock "$lock_dir"
+    return 1  # Queue empty
+  fi
+
+  # Remove first line from queue
+  tail -n +2 "$TASK_QUEUE_FILE" > "${TASK_QUEUE_FILE}.tmp" 2>/dev/null
+  mv "${TASK_QUEUE_FILE}.tmp" "$TASK_QUEUE_FILE" 2>/dev/null
+
+  # Release lock
+  release_lock "$lock_dir"
+
+  # Output the task
+  echo "$task"
+  return 0
+}
+
+# Get next engine using round-robin (atomic)
+# Returns: engine name
+get_next_engine_atomic() {
+  local engine_count=${#ENGINES[@]}
+
+  # If no engines configured or only one, return default/single
+  if [[ $engine_count -eq 0 ]]; then
+    echo "$AI_ENGINE"
+    return
+  fi
+
+  if [[ $engine_count -eq 1 ]]; then
+    echo "${ENGINES[0]}"
+    return
+  fi
+
+  local lock_dir="${ENGINE_COUNTER_FILE}.lock.dir"
+
+  # Acquire lock
+  if ! acquire_lock "$lock_dir"; then
+    # Fallback to first engine if lock fails
+    echo "${ENGINES[0]}"
+    return
+  fi
+
+  local counter
+  counter=$(cat "$ENGINE_COUNTER_FILE" 2>/dev/null || echo "0")
+  local index=$((counter % engine_count))
+
+  # Increment counter for next call
+  echo $((counter + 1)) > "$ENGINE_COUNTER_FILE"
+
+  # Release lock
+  release_lock "$lock_dir"
+
+  echo "${ENGINES[$index]}"
+}
+
+# Get count of remaining tasks in queue
+task_queue_remaining() {
+  local lock_dir="${TASK_QUEUE_LOCK}.dir"
+
+  # Try to get lock, but don't block forever for status check
+  if acquire_lock "$lock_dir"; then
+    local count
+    count=$(wc -l < "$TASK_QUEUE_FILE" 2>/dev/null | tr -d ' ')
+    release_lock "$lock_dir"
+    echo "${count:-0}"
+  else
+    # If we can't get lock, return estimate
+    wc -l < "$TASK_QUEUE_FILE" 2>/dev/null | tr -d ' ' || echo "0"
+  fi
+}
+
+# Worker process that claims and executes tasks until queue is empty
+# Usage: run_worker <worker_id>
+run_worker() {
+  local worker_id=$1
+  local tasks_completed=0
+
+  # Deserialize engine configuration
+  deserialize_engine_config
+
+  while true; do
+    # Try to claim a task
+    local task
+    task=$(task_queue_claim) || break  # Exit loop if queue empty
+
+    ((tasks_completed++)) || true
+
+    # Get next engine (round-robin across all workers)
+    local engine
+    engine=$(get_next_engine_atomic)
+
+    # Generate unique agent number for this task
+    local agent_num="${worker_id}_${tasks_completed}"
+
+    # Create temp files for this task
+    local status_file=$(mktemp)
+    local output_file=$(mktemp)
+    local log_file=$(mktemp)
+
+    # Store result metadata
+    local result_file="${RESULTS_DIR}/task_${worker_id}_${tasks_completed}.result"
+
+    echo "Worker $worker_id claimed task: $task (engine: $engine)" >> "$log_file"
+
+    # Execute the task
+    run_parallel_agent "$task" "$agent_num" "$engine" "$output_file" "$status_file" "$log_file"
+
+    # Store result for later collection
+    {
+      echo "worker=$worker_id"
+      echo "task=$task"
+      echo "engine=$engine"
+      echo "status=$(cat "$status_file" 2>/dev/null | head -1)"
+      echo "output=$(cat "$output_file" 2>/dev/null)"
+      echo "log_file=$log_file"
+    } > "$result_file"
+
+    # Cleanup temp files (keep log for failures)
+    rm -f "$status_file" "$output_file"
+  done
+
+  echo "$tasks_completed"
+}
+
+# Run a group of tasks using worker pool pattern
+# Workers dynamically claim tasks - no engine sits idle while work remains
+# Usage: run_group_with_worker_pool <tasks_array_name> <group_label>
+# Returns: completed branches in POOL_COMPLETED_BRANCHES array
+run_group_with_worker_pool() {
+  local -n tasks_ref=$1
+  local group_label="${2:-}"
+  local total_tasks=${#tasks_ref[@]}
+
+  # Reset results
+  POOL_COMPLETED_BRANCHES=()
+
+  if [[ $total_tasks -eq 0 ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo "${BOLD}Worker Pool${group_label}: $total_tasks tasks, $MAX_PARALLEL workers${RESET}"
+  echo "${DIM}Workers dynamically claim tasks - engines stay busy until queue empty${RESET}"
+  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo ""
+
+  # Initialize task queue
+  task_queue_init tasks_ref
+
+  # Show engines being used
+  if [[ ${#ENGINES[@]} -gt 1 ]]; then
+    echo "${DIM}Engines in rotation: ${ENGINES[*]}${RESET}"
+  else
+    echo "${DIM}Engine: ${AI_ENGINE}${RESET}"
+  fi
+  echo ""
+
+  # Spawn workers
+  local worker_pids=()
+  local num_workers=$MAX_PARALLEL
+  [[ $num_workers -gt $total_tasks ]] && num_workers=$total_tasks
+
+  for ((w = 1; w <= num_workers; w++)); do
+    printf "  ${CYAN}◉${RESET} Starting worker %d...\n" "$w"
+    (
+      run_worker "$w"
+    ) &
+    worker_pids+=($!)
+  done
+
+  echo ""
+  echo "${DIM}Workers running... (tasks claimed dynamically)${RESET}"
+
+  # Monitor progress
+  local start_time=$SECONDS
+  while true; do
+    local remaining
+    remaining=$(task_queue_remaining)
+    local completed=$((total_tasks - remaining))
+    local elapsed=$((SECONDS - start_time))
+
+    # Check if any workers still running
+    local workers_running=0
+    for pid in "${worker_pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        ((workers_running++)) || true
+      fi
+    done
+
+    printf "\r  ${BLUE}Progress:${RESET} %d/%d tasks completed (%d workers active, %ds elapsed)    " \
+      "$completed" "$total_tasks" "$workers_running" "$elapsed"
+
+    [[ $workers_running -eq 0 ]] && break
+    sleep 1
+  done
+
+  echo ""
+  echo ""
+
+  # Wait for all workers to fully exit
+  for pid in "${worker_pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+
+  # Collect results
+  echo "${BOLD}Results:${RESET}"
+  local success_count=0
+  local fail_count=0
+
+  for result_file in "$RESULTS_DIR"/*.result; do
+    [[ -f "$result_file" ]] || continue
+
+    local task="" engine="" status="" output="" log_file=""
+    while IFS='=' read -r key value; do
+      case "$key" in
+        task) task="$value" ;;
+        engine) engine="$value" ;;
+        status) status="$value" ;;
+        output) output="$value" ;;
+        log_file) log_file="$value" ;;
+      esac
+    done < "$result_file"
+
+    local icon color branch_info=""
+
+    case "$status" in
+      done)
+        icon="✓"
+        color="$GREEN"
+        ((success_count++)) || true
+
+        # Parse output for branch and tokens
+        local in_tok=$(echo "$output" | awk '{print $1}')
+        local out_tok=$(echo "$output" | awk '{print $2}')
+        local branch=$(echo "$output" | awk '{print $3}')
+
+        [[ "$in_tok" =~ ^[0-9]+$ ]] || in_tok=0
+        [[ "$out_tok" =~ ^[0-9]+$ ]] || out_tok=0
+        total_input_tokens=$((total_input_tokens + in_tok))
+        total_output_tokens=$((total_output_tokens + out_tok))
+
+        if [[ -n "$branch" ]]; then
+          POOL_COMPLETED_BRANCHES+=("$branch")
+          branch_info=" → ${CYAN}$branch${RESET}"
+        fi
+
+        # Mark task complete
+        if [[ "$PRD_SOURCE" == "markdown" ]]; then
+          mark_task_complete_markdown "$task"
+        elif [[ "$PRD_SOURCE" == "yaml" ]]; then
+          mark_task_complete_yaml "$task"
+        elif [[ "$PRD_SOURCE" == "github" ]]; then
+          mark_task_complete_github "$task"
+        fi
+        ;;
+      failed)
+        icon="✗"
+        color="$RED"
+        ((fail_count++)) || true
+        ;;
+      *)
+        icon="?"
+        color="$YELLOW"
+        ((fail_count++)) || true
+        ;;
+    esac
+
+    # Get engine color
+    local engine_color=""
+    case "$engine" in
+      claude)   engine_color="$CYAN" ;;
+      opencode) engine_color="$GREEN" ;;
+      cursor)   engine_color="$MAGENTA" ;;
+      codex)    engine_color="$YELLOW" ;;
+      qwen)     engine_color="$BLUE" ;;
+      droid)    engine_color="$RED" ;;
+    esac
+
+    printf "  ${color}%s${RESET} [${engine_color}%s${RESET}] %s%s\n" \
+      "$icon" "$engine" "${task:0:50}" "$branch_info"
+
+    # Show log for failures
+    if [[ "$status" == "failed" ]] && [[ -n "$log_file" ]] && [[ -s "$log_file" ]]; then
+      echo "${DIM}    ┌─ Log:${RESET}"
+      sed 's/^/    │ /' "$log_file" | head -10
+    fi
+  done
+
+  echo ""
+  echo "${DIM}Completed: $success_count succeeded, $fail_count failed${RESET}"
+
+  # Cleanup
+  rm -rf "$RESULTS_DIR" "$TASK_QUEUE_FILE" "$TASK_QUEUE_LOCK" "${TASK_QUEUE_LOCK}.dir" "$ENGINE_COUNTER_FILE" "${ENGINE_COUNTER_FILE}.lock.dir" 2>/dev/null || true
+
+  return 0
+}
+
 # Create an isolated worktree for a parallel agent
 create_agent_worktree() {
   local task_name="$1"
@@ -2663,6 +3114,69 @@ get_engine_name() {
       fi
       ;;
   esac
+}
+
+# Get short engine name for status display
+get_engine_short_name() {
+  case "$AI_ENGINE" in
+    claude) echo "claude" ;;
+    opencode) echo "opencode" ;;
+    cursor) echo "cursor" ;;
+    codex) echo "codex" ;;
+    qwen) echo "qwen" ;;
+    droid) echo "droid" ;;
+    *) echo "claude" ;;  # Default to claude
+  esac
+}
+
+# Get color code for an engine
+get_engine_color() {
+  local engine="${1:-$AI_ENGINE}"
+  case "$engine" in
+    claude) echo "$BLUE" ;;
+    cursor) echo "$GREEN" ;;
+    opencode) echo "$YELLOW" ;;
+    codex) echo "$MAGENTA" ;;
+    qwen) echo "$CYAN" ;;
+    droid) echo "$RED" ;;
+    *) echo "$MAGENTA" ;;
+  esac
+}
+
+# Display status for parallel agents during execution
+display_agent_status() {
+  local -n pids=$1
+  local -n status_file_paths=$2
+  local batch_size=$3
+  local start_time=$4
+
+  local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local spinner_idx=0
+  local all_done=false
+
+  while ! $all_done; do
+    all_done=true
+    local running_count=0
+
+    for i in "${!pids[@]}"; do
+      if kill -0 "${pids[$i]}" 2>/dev/null; then
+        all_done=false
+        ((running_count++))
+      fi
+    done
+
+    if ! $all_done; then
+      local elapsed=$((SECONDS - start_time))
+      local spinner_char=${spinner_chars:$spinner_idx:1}
+      spinner_idx=$(( (spinner_idx + 1) % ${#spinner_chars} ))
+      printf "\r  ${CYAN}%s${RESET} %d/%d agents running (${elapsed}s elapsed)" \
+        "$spinner_char" "$running_count" "$batch_size"
+      sleep 0.2
+    fi
+  done
+
+  # Clear the spinner line
+  printf "\r%80s\r" ""
 }
 
 # Run a single agent in its own isolated worktree
@@ -2925,8 +3439,8 @@ Focus only on implementing: $task_name"
   fi
 }
 
-# Display engine assignment preview table for first 10 tasks
-# Reads from global all_tasks array
+# Display multi-engine configuration preview
+# Shows engines and tasks that will be processed
 print_engine_assignment_preview() {
   # Use eval to access the array passed by name
   local array_name="$1[@]"
@@ -2940,43 +3454,38 @@ print_engine_assignment_preview() {
   fi
 
   echo ""
-  echo "${BOLD}Engine Assignment Preview (first $preview_count tasks):${RESET}"
+  echo "${BOLD}Multi-Engine Configuration:${RESET}"
   echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-  # Print header
-  printf "${BOLD}%-8s %-12s %-50s${RESET}\n" "Agent" "Engine" "Task"
-  echo "${DIM}────────────────────────────────────────────────────────────────────${RESET}"
-
-  # Print preview for first 10 tasks
-  for ((i = 0; i < preview_count; i++)); do
-    local agent_num=$((i + 1))
-    local engine=$(get_engine_for_agent "$agent_num")
-    local task="${tasks_array[$i]}"
-
-    # Truncate task name if too long
-    if [[ ${#task} -gt 48 ]]; then
-      task="${task:0:45}..."
-    fi
-
-    # Color engine name
-    local engine_display
+  echo ""
+  echo "${BOLD}Engines (${#ENGINES[@]}):${RESET}"
+  for engine in "${ENGINES[@]}"; do
+    local engine_color=""
     case "$engine" in
-      opencode) engine_display="${CYAN}${engine}${RESET}" ;;
-      cursor) engine_display="${YELLOW}${engine}${RESET}" ;;
-      codex) engine_display="${BLUE}${engine}${RESET}" ;;
-      qwen) engine_display="${GREEN}${engine}${RESET}" ;;
-      droid) engine_display="${MAGENTA}${engine}${RESET}" ;;
-      claude) engine_display="${MAGENTA}${engine}${RESET}" ;;
-      *) engine_display="${engine}" ;;
+      claude)   engine_color="$CYAN" ;;
+      opencode) engine_color="$GREEN" ;;
+      cursor)   engine_color="$MAGENTA" ;;
+      codex)    engine_color="$YELLOW" ;;
+      qwen)     engine_color="$BLUE" ;;
+      droid)    engine_color="$RED" ;;
     esac
-
-    printf "%-8s %-12s %-50s\n" "$agent_num" "$engine_display" "$task"
+    printf "  ${engine_color}◆${RESET} %s\n" "$engine"
   done
-
+  echo ""
+  echo "${BOLD}Distribution:${RESET} ${ENGINE_DISTRIBUTION} (dynamic work-stealing)"
+  echo "${DIM}Workers claim tasks as they complete - no engine sits idle while work remains${RESET}"
+  echo ""
+  echo "${BOLD}Tasks ($num_tasks):${RESET}"
+  for ((i = 0; i < preview_count; i++)); do
+    local task="${tasks_array[$i]}"
+    if [[ ${#task} -gt 60 ]]; then
+      task="${task:0:57}..."
+    fi
+    printf "  %2d. %s\n" "$((i + 1))" "$task"
+  done
   if [[ $num_tasks -gt 10 ]]; then
-    echo "${DIM}... and $((num_tasks - 10)) more tasks${RESET}"
+    echo "${DIM}  ... and $((num_tasks - 10)) more tasks${RESET}"
   fi
-
+  echo ""
   echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo ""
 }
@@ -3073,158 +3582,14 @@ run_parallel_tasks() {
       tasks=("${all_tasks[@]}")
     fi
 
-    local batch_start=0
-    local total_group_tasks=${#tasks[@]}
+    # Use worker pool pattern - workers dynamically claim tasks
+    # No engine sits idle while work remains in the queue
+    run_group_with_worker_pool tasks "$group_label"
 
-    while [[ $batch_start -lt $total_group_tasks ]]; do
-      ((batch_num++)) || true
-      local batch_end=$((batch_start + MAX_PARALLEL))
-      [[ $batch_end -gt $total_group_tasks ]] && batch_end=$total_group_tasks
-      local batch_size=$((batch_end - batch_start))
-
-      echo ""
-      echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-      echo "${BOLD}Batch $batch_num${group_label}: Spawning $batch_size parallel agents${RESET}"
-      echo "${DIM}Each agent runs in its own git worktree with isolated workspace${RESET}"
-      echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-      echo ""
-
-      # Setup arrays for this batch
-      parallel_pids=()
-      local batch_tasks=()
-      local status_files=()
-      local output_files=()
-      local log_files=()
-
-      # Start all agents in the batch
-      for ((i = batch_start; i < batch_end; i++)); do
-        local task="${tasks[$i]}"
-        local agent_num=$((iteration + 1))
-        ((iteration++)) || true
-
-        local status_file=$(mktemp)
-        local output_file=$(mktemp)
-        local log_file=$(mktemp)
-        local engine=$(get_engine_for_agent "$agent_num")
-
-        batch_tasks+=("$task")
-        status_files+=("$status_file")
-        output_files+=("$output_file")
-        log_files+=("$log_file")
-
-        echo "waiting" > "$status_file"
-        echo "engine=$AI_ENGINE" >> "$status_file"
-
-        # Show initial status
-        local engine_name=$(get_engine_short_name)
-        printf "  ${CYAN}◉${RESET} Agent %d (%s): %s\n" "$agent_num" "$engine_name" "${task:0:50}"
-
-        # Run agent in background
-        (
-          run_parallel_agent "$task" "$agent_num" "$engine" "$output_file" "$status_file" "$log_file"
-        ) &
-        parallel_pids+=($!)
-      done
-
-      echo ""
-
-      # Monitor progress with status display
-      local start_time=$SECONDS
-      display_agent_status parallel_pids status_files "$batch_size" "$start_time"
-
-      # Wait for all processes to fully complete
-      for pid in "${parallel_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-      done
-
-      # Show final status for this batch
-      echo ""
-      echo "${BOLD}Batch $batch_num Results:${RESET}"
-      for ((j = 0; j < batch_size; j++)); do
-        local task="${batch_tasks[$j]}"
-        local status_file="${status_files[$j]}"
-        local output_file="${output_files[$j]}"
-        local log_file="${log_files[$j]}"
-        local status=$(cat "$status_file" 2>/dev/null || echo "unknown")
-        local agent_num=$((iteration - batch_size + j + 1))
-
-        local icon color branch_info="" engine_info=""
-        case "$status" in
-          done)
-            icon="✓"
-            color="$GREEN"
-            # Collect tokens, branch name, and engine name
-            local output_data=$(cat "$output_file" 2>/dev/null || echo "0 0")
-            local in_tok=$(echo "$output_data" | awk '{print $1}')
-            local out_tok=$(echo "$output_data" | awk '{print $2}')
-            local branch=$(echo "$output_data" | awk '{print $3}')
-            local engine=$(echo "$output_data" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//')
-            [[ "$in_tok" =~ ^[0-9]+$ ]] || in_tok=0
-            [[ "$out_tok" =~ ^[0-9]+$ ]] || out_tok=0
-            total_input_tokens=$((total_input_tokens + in_tok))
-            total_output_tokens=$((total_output_tokens + out_tok))
-            if [[ -n "$branch" ]]; then
-              completed_branches+=("$branch")
-              group_completed_branches+=("$branch")  # Also track per-group
-              branch_info=" → ${CYAN}$branch${RESET}"
-            fi
-            if [[ -n "$engine" ]]; then
-              engine_info=" ${DIM}($engine)${RESET}"
-            fi
-
-            # Mark task complete in PRD
-            if [[ "$PRD_SOURCE" == "markdown" ]]; then
-              mark_task_complete_markdown "$task"
-            elif [[ "$PRD_SOURCE" == "yaml" ]]; then
-              mark_task_complete_yaml "$task"
-            elif [[ "$PRD_SOURCE" == "github" ]]; then
-              mark_task_complete_github "$task"
-            fi
-            ;;
-          failed)
-            icon="✗"
-            color="$RED"
-            # Extract engine name from output file
-            local output_data=$(cat "$output_file" 2>/dev/null || echo "0 0")
-            local engine=$(echo "$output_data" | awk '{$1=$2=$3=""; print $0}' | sed 's/^ *//')
-            if [[ -n "$engine" ]]; then
-              engine_info=" ${DIM}($engine)${RESET}"
-            fi
-            if [[ -s "$log_file" ]]; then
-              branch_info=" ${DIM}(error below)${RESET}"
-            fi
-            ;;
-          *)
-            icon="?"
-            color="$YELLOW"
-            ;;
-        esac
-
-        local engine_name=$(get_engine_short_name)
-        printf "  ${color}%s${RESET} Agent %d (%s): %s%s\n" "$icon" "$agent_num" "$engine_name" "${task:0:45}" "$branch_info"
-
-        # Show log for failed agents
-        if [[ "$status" == "failed" ]] && [[ -s "$log_file" ]]; then
-          echo "${DIM}    ┌─ Agent $agent_num ($engine_name) log:${RESET}"
-          sed 's/^/    │ /' "$log_file" | head -20
-          local log_lines=$(wc -l < "$log_file")
-          if [[ $log_lines -gt 20 ]]; then
-            echo "${DIM}    │ ... ($((log_lines - 20)) more lines)${RESET}"
-          fi
-          echo "${DIM}    └─${RESET}"
-        fi
-
-        # Cleanup temp files
-        rm -f "$status_file" "$output_file" "$log_file"
-      done
-
-      batch_start=$batch_end
-
-      # Check if we've hit max iterations
-      if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $iteration -ge $MAX_ITERATIONS ]]; then
-        log_warn "Reached max iterations ($MAX_ITERATIONS)"
-        break
-      fi
+    # Copy completed branches from pool result
+    for branch in "${POOL_COMPLETED_BRANCHES[@]}"; do
+      completed_branches+=("$branch")
+      group_completed_branches+=("$branch")
     done
 
     # After each parallel_group completes, merge branches into integration branch
@@ -3662,7 +4027,8 @@ main() {
   parse_args "$@"
 
   # Backward compatibility: populate ENGINES if not set
-  if [[ ${#ENGINES[@]} -eq 0 ]]; then
+  # Skip if using --multi-engine (it will auto-detect)
+  if [[ ${#ENGINES[@]} -eq 0 ]] && [[ "$MULTI_ENGINE" != true ]]; then
     ENGINES=("$AI_ENGINE")
   fi
 
@@ -3741,20 +4107,78 @@ main() {
   # Check requirements
   check_requirements
 
+  # Handle multi-engine auto-detection
+  if [[ "$MULTI_ENGINE" == true ]]; then
+    if [[ ${#ENGINES[@]} -eq 0 ]]; then
+      # No explicit engines specified, auto-detect
+      local detected_engines_str
+      detected_engines_str=$(detect_available_engines)
+
+      if [[ -z "$detected_engines_str" ]]; then
+        log_error "No AI engines detected on this system"
+        log_info "Install at least one of: claude, opencode, cursor (agent), codex, qwen, droid"
+        exit 1
+      fi
+
+      # Convert to array
+      read -ra ENGINES <<< "$detected_engines_str"
+
+      if [[ ${#ENGINES[@]} -lt 2 ]]; then
+        log_warn "Only one engine detected (${ENGINES[0]}). Multi-engine mode requires 2+ engines."
+        log_info "Continuing with single engine mode."
+        MULTI_ENGINE=false
+      else
+        # Set default weights (equal distribution)
+        for engine in "${ENGINES[@]}"; do
+          ENGINE_WEIGHTS[$engine]="1"
+        done
+
+        # Print detected engines
+        print_detected_engines
+      fi
+    else
+      # Engines were explicitly specified via --engines, just show them
+      log_info "Using explicitly specified engines: ${ENGINES[*]}"
+    fi
+  fi
+
   # Show banner
   echo "${BOLD}============================================${RESET}"
   echo "${BOLD}Ralphy${RESET} - Running until PRD is complete"
-  local engine_color=$(get_engine_color)
-  local engine_display
-  case "$AI_ENGINE" in
-    opencode) engine_display="${engine_color}OpenCode${RESET}" ;;
-    cursor) engine_display="${engine_color}Cursor Agent${RESET}" ;;
-    codex) engine_display="${engine_color}Codex${RESET}" ;;
-    qwen) engine_display="${engine_color}Qwen-Code${RESET}" ;;
-    droid) engine_display="${engine_color}Factory Droid${RESET}" ;;
-    *) engine_display="${engine_color}Claude Code${RESET}" ;;
-  esac
-  echo "Engine: $engine_display"
+
+  # Show engine(s) info
+  if [[ ${#ENGINES[@]} -gt 1 ]]; then
+    # Multi-engine mode - show all configured engines
+    local engines_display=""
+    for engine in "${ENGINES[@]}"; do
+      local color=""
+      case "$engine" in
+        claude)   color="$CYAN" ;;
+        opencode) color="$GREEN" ;;
+        cursor)   color="$MAGENTA" ;;
+        codex)    color="$YELLOW" ;;
+        qwen)     color="$BLUE" ;;
+        droid)    color="$RED" ;;
+        *)        color="" ;;
+      esac
+      [[ -n "$engines_display" ]] && engines_display+=", "
+      engines_display+="${color}${engine}${RESET}"
+    done
+    echo "Engines: $engines_display (${#ENGINES[@]} engines, ${ENGINE_DISTRIBUTION} distribution)"
+  else
+    # Single engine mode
+    local engine_color=$(get_engine_color)
+    local engine_display
+    case "$AI_ENGINE" in
+      opencode) engine_display="${engine_color}OpenCode${RESET}" ;;
+      cursor) engine_display="${engine_color}Cursor Agent${RESET}" ;;
+      codex) engine_display="${engine_color}Codex${RESET}" ;;
+      qwen) engine_display="${engine_color}Qwen-Code${RESET}" ;;
+      droid) engine_display="${engine_color}Factory Droid${RESET}" ;;
+      *) engine_display="${engine_color}Claude Code${RESET}" ;;
+    esac
+    echo "Engine: $engine_display"
+  fi
   echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
   if [[ -d "$RALPHY_DIR" ]]; then
     echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
@@ -3764,6 +4188,7 @@ main() {
   [[ "$SKIP_TESTS" == true ]] && mode_parts+=("no-tests")
   [[ "$SKIP_LINT" == true ]] && mode_parts+=("no-lint")
   [[ "$DRY_RUN" == true ]] && mode_parts+=("dry-run")
+  [[ "$MULTI_ENGINE" == true ]] && mode_parts+=("multi-engine")
   [[ "$PARALLEL" == true ]] && mode_parts+=("parallel:$MAX_PARALLEL")
   [[ "$BRANCH_PER_TASK" == true ]] && mode_parts+=("branch-per-task")
   [[ "$CREATE_PR" == true ]] && mode_parts+=("create-pr")
