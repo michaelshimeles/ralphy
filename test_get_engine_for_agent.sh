@@ -7,17 +7,11 @@ set -euo pipefail
 # Define the function inline for testing
 declare -a ENGINES=()
 AI_ENGINE="claude"
-<<<<<<< HEAD
-
-get_engine_for_agent() {
-  local agent_num=$1
-=======
 ENGINE_DISTRIBUTION="round-robin"
 
 get_engine_for_agent() {
   local agent_num=$1
   local total_agents=${2:-0}
->>>>>>> ralphy/agent-12-add-fill-first-distribution-strategy-to-get-engine
   local engine_count=${#ENGINES[@]}
 
   # If no engines configured, return default
@@ -26,11 +20,6 @@ get_engine_for_agent() {
     return
   fi
 
-<<<<<<< HEAD
-  # Round-robin distribution: agent_num % engine_count
-  local engine_index=$((agent_num % engine_count))
-  echo "${ENGINES[$engine_index]}"
-=======
   case "$ENGINE_DISTRIBUTION" in
     round-robin)
       # Round-robin distribution: agent_num % engine_count
@@ -68,7 +57,6 @@ get_engine_for_agent() {
       echo "${ENGINES[$engine_index]}"
       ;;
   esac
->>>>>>> ralphy/agent-12-add-fill-first-distribution-strategy-to-get-engine
 }
 
 # Test 1: Empty ENGINES array should return AI_ENGINE default
@@ -152,8 +140,6 @@ fi
 echo "✓ PASS: Large agent numbers handled correctly"
 
 echo -e "\n=========================================="
-<<<<<<< HEAD
-=======
 echo "Round-robin tests passed! ✓"
 echo "=========================================="
 
@@ -287,6 +273,5 @@ fi
 echo "✓ PASS: Fill-first with large numbers"
 
 echo -e "\n=========================================="
->>>>>>> ralphy/agent-12-add-fill-first-distribution-strategy-to-get-engine
 echo "All tests passed! ✓"
 echo "=========================================="
