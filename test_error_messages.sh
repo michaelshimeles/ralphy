@@ -40,7 +40,7 @@ test_error "Unknown engine in list" --engines claude,foobar,cursor --dry-run
 echo "=== Test 3: Invalid weight format (non-numeric) ==="
 test_error "Invalid weight (non-numeric)" --engines claude:abc --dry-run
 
-# Test 4: Invalid weight format (negative)
+# Test 4: Invalid weight format (zero)
 echo "=== Test 4: Invalid weight format (zero) ==="
 test_error "Invalid weight (zero)" --engines claude:0 --dry-run
 

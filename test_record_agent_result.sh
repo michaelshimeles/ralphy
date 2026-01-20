@@ -73,7 +73,7 @@ record_agent_result() {
   fi
 
   # Initialize engine metrics if not already set
-  if [[ -z "${ENGINE_AGENT_COUNT[$engine]}" ]]; then
+  if [[ -z "${ENGINE_AGENT_COUNT[$engine]:-}" ]]; then
     ENGINE_AGENT_COUNT[$engine]=0
     ENGINE_SUCCESS[$engine]=0
     ENGINE_FAILURES[$engine]=0

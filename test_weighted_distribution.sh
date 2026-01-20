@@ -163,7 +163,8 @@ run_tests() {
   # Test 1: No engines configured - should return default
   echo "Test Group 1: No engines configured"
   ENGINES=()
-  ENGINE_WEIGHTS=()
+  unset ENGINE_WEIGHTS
+  declare -A ENGINE_WEIGHTS
   EXPANDED_ENGINES=()
   ENGINE_DISTRIBUTION="round-robin"
   result=$(get_engine_for_agent 0)
@@ -246,7 +247,8 @@ run_tests() {
   # Test 7: Weighted distribution with missing weights (should default to 1)
   echo "Test Group 7: Weighted distribution - missing weights default to 1"
   ENGINES=("claude" "opencode")
-  ENGINE_WEIGHTS=([claude]=3)  # opencode weight not specified
+  unset ENGINE_WEIGHTS
+  declare -A ENGINE_WEIGHTS=([claude]=3)  # opencode weight not specified
   EXPANDED_ENGINES=()
   ENGINE_DISTRIBUTION="weighted"
 

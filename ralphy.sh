@@ -4153,11 +4153,11 @@ main() {
   # Skip if using --multi-engine (it will auto-detect)
   if [[ ${#ENGINES[@]} -eq 0 ]] && [[ "$MULTI_ENGINE" != true ]]; then
     ENGINES=("$AI_ENGINE")
+  fi
 
   # Load browser setting from config (if not overridden by CLI flag)
   if [[ "$BROWSER_ENABLED" == "auto" ]] && [[ -f "$CONFIG_FILE" ]]; then
     BROWSER_ENABLED=$(load_browser_setting)
-
   fi
 
   # Handle --init mode
