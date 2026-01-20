@@ -53,6 +53,9 @@ PRD_FILE="PRD.md"
 GITHUB_REPO=""
 GITHUB_LABEL=""
 
+# Browser automation (agent-browser)
+BROWSER_ENABLED="auto"  # auto, true, false
+
 # Colors (detect if terminal supports colors)
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
   RED=$(tput setaf 1)
@@ -131,6 +134,57 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Check if agent-browser is available
+is_browser_available() {
+  if [[ "$BROWSER_ENABLED" == "false" ]]; then
+    return 1
+  fi
+  if [[ "$BROWSER_ENABLED" == "true" ]]; then
+    if ! command -v agent-browser &>/dev/null; then
+      log_warn "--browser flag used but agent-browser CLI not found"
+      log_warn "Install from: https://agent-browser.dev"
+      return 1
+    fi
+    return 0
+  fi
+  # auto mode: check if available
+  command -v agent-browser &>/dev/null
+}
+
+# Get browser instructions for prompt injection
+get_browser_instructions() {
+  if ! is_browser_available; then
+    return
+  fi
+
+  cat << 'BROWSER_EOF'
+## Browser Automation (agent-browser)
+You have access to browser automation via the `agent-browser` CLI.
+
+**Key Commands:**
+- `agent-browser open <url>` - Open a URL in the browser
+- `agent-browser snapshot` - Get accessibility tree with element refs (@e1, @e2, etc.)
+- `agent-browser click @e1` - Click an element by reference
+- `agent-browser type @e1 "text"` - Type text into an input field
+- `agent-browser screenshot <file.png>` - Capture screenshot
+- `agent-browser content` - Get page text content
+- `agent-browser close` - Close browser session
+
+**Workflow:**
+1. Use `open` to navigate to a URL
+2. Use `snapshot` to see available elements (returns refs like @e1, @e2)
+3. Use `click`/`type` with element refs to interact
+4. Use `screenshot` for visual verification
+
+**Use browser automation for:**
+- Testing web UI after implementing features
+- Verifying deployments
+- Filling forms or checking workflows
+- Visual regression testing
+
+BROWSER_EOF
 }
 
 # ============================================
@@ -634,6 +688,12 @@ boundaries:
     # - "src/legacy/**"
     # - "migrations/**"
     # - "*.lock"
+
+# Capabilities - optional tool integrations
+capabilities:
+  # Browser automation via agent-browser (https://agent-browser.dev)
+  # Values: "auto" (detect), "true" (force enable), "false" (disable)
+  browser: "auto"
 EOF
 
   # Create progress.txt
@@ -667,6 +727,19 @@ load_ralphy_boundaries() {
 
   if command -v yq &>/dev/null; then
     yq -r ".boundaries.$boundary_type // [] | .[]" "$CONFIG_FILE" 2>/dev/null || true
+  fi
+}
+
+# Load browser setting from config.yaml
+load_browser_setting() {
+  [[ ! -f "$CONFIG_FILE" ]] && echo "auto" && return
+
+  if command -v yq &>/dev/null; then
+    local setting
+    setting=$(yq -r '.capabilities.browser // "auto"' "$CONFIG_FILE" 2>/dev/null || echo "auto")
+    echo "$setting"
+  else
+    echo "auto"
   fi
 }
 
@@ -731,6 +804,21 @@ show_ralphy_config() {
       done
       echo ""
     fi
+
+    # Capabilities
+    local browser_setting
+    browser_setting=$(yq -r '.capabilities.browser // "auto"' "$CONFIG_FILE" 2>/dev/null)
+    echo "${BOLD}Capabilities:${RESET}"
+    local browser_status="$browser_setting"
+    if [[ "$browser_setting" == "auto" ]]; then
+      if command -v agent-browser &>/dev/null; then
+        browser_status="auto ${GREEN}(available)${RESET}"
+      else
+        browser_status="auto ${DIM}(not installed)${RESET}"
+      fi
+    fi
+    echo "  Browser: $browser_status"
+    echo ""
   else
     # Fallback: just show the file
     cat "$CONFIG_FILE"
@@ -876,6 +964,15 @@ $rules
 "
   fi
 
+  # Add browser instructions if available
+  local browser_instructions
+  browser_instructions=$(get_browser_instructions)
+  if [[ -n "$browser_instructions" ]]; then
+    prompt+="$browser_instructions
+
+"
+  fi
+
   # Add boundaries
   local never_touch
   never_touch=$(load_ralphy_boundaries "never_touch")
@@ -927,6 +1024,9 @@ run_brownfield_task() {
   output_file=$(mktemp)
 
   log_info "Running with $AI_ENGINE..."
+  if is_browser_available; then
+    log_info "Browser automation enabled (agent-browser)"
+  fi
 
   # Run the AI engine (tee to show output while saving for parsing)
   case "$AI_ENGINE" in
@@ -1048,6 +1148,10 @@ ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
 
+${BOLD}CAPABILITIES:${RESET}
+  --browser           Enable browser automation (requires agent-browser)
+  --no-browser        Disable browser automation
+
 ${BOLD}OTHER OPTIONS:${RESET}
   -v, --verbose       Show debug output
   -h, --help          Show this help
@@ -1058,6 +1162,7 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --init                       # Initialize config
   ./ralphy.sh "add dark mode toggle"       # Run single task
   ./ralphy.sh "fix the login bug" --cursor # Single task with Cursor
+  ./ralphy.sh "test the login flow" --browser  # Task with browser automation
 
   # PRD mode (task lists)
   ./ralphy.sh                              # Run with Claude Code
@@ -1296,6 +1401,14 @@ parse_args() {
         ;;
       --no-commit)
         AUTO_COMMIT=false
+        shift
+        ;;
+      --browser)
+        BROWSER_ENABLED="true"
+        shift
+        ;;
+      --no-browser)
+        BROWSER_ENABLED="false"
         shift
         ;;
       -*)
@@ -2086,6 +2199,15 @@ $never_touch
 
 "
     fi
+  fi
+
+  # Add browser instructions if available
+  local browser_instructions
+  browser_instructions=$(get_browser_instructions)
+  if [[ -n "$browser_instructions" ]]; then
+    prompt+="$browser_instructions
+
+"
   fi
 
   # Add context based on PRD source
@@ -4026,10 +4148,16 @@ print_engine_summary() {
 main() {
   parse_args "$@"
 
+
   # Backward compatibility: populate ENGINES if not set
   # Skip if using --multi-engine (it will auto-detect)
   if [[ ${#ENGINES[@]} -eq 0 ]] && [[ "$MULTI_ENGINE" != true ]]; then
     ENGINES=("$AI_ENGINE")
+
+  # Load browser setting from config (if not overridden by CLI flag)
+  if [[ "$BROWSER_ENABLED" == "auto" ]] && [[ -f "$CONFIG_FILE" ]]; then
+    BROWSER_ENABLED=$(load_browser_setting)
+
   fi
 
   # Handle --init mode
