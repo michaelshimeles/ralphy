@@ -48,4 +48,4 @@ export interface AIEngine {
 /**
  * Supported AI engine names
  */
-export type AIEngineName = "claude" | "opencode" | "cursor" | "codex" | "qwen" | "droid";
+export type AIEngineName = "claude" | "opencode" | "cursor" | "codex" | "qwen" | "droid" | "gemini";

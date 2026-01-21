@@ -13,7 +13,7 @@ export function createProgram(): Command {
   program
     .name("ralphy")
     .description(
-      "Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code and Factory Droid",
+      "Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid and Gemini CLI",
     )
     .version(VERSION)
     .argument("[task]", "Single task to execute (brownfield mode)")
@@ -29,6 +29,7 @@ export function createProgram(): Command {
     .option("--codex", "Use Codex")
     .option("--qwen", "Use Qwen-Code")
     .option("--droid", "Use Factory Droid")
+    .option("--gemini", "Use Gemini CLI")
     .option("--dry-run", "Show what would be done without executing")
     .option("--max-iterations <n>", "Maximum iterations (0 = unlimited)", "0")
     .option("--max-retries <n>", "Maximum retries per task", "3")
@@ -81,6 +82,7 @@ export function parseArgs(args: string[]): {
   else if (opts.codex) aiEngine = "codex";
   else if (opts.qwen) aiEngine = "qwen";
   else if (opts.droid) aiEngine = "droid";
+  else if (opts.gemini) aiEngine = "gemini";
 
   // Determine model override (--sonnet is shortcut for --model sonnet)
   const modelOverride = opts.sonnet ? "sonnet" : opts.model || undefined;
