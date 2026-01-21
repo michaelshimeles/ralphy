@@ -44,7 +44,13 @@ function getPlatformBinary() {
 function commandExists(name) {
 	try {
 		const cmd = isWindows ? "where" : "which";
-		const result = spawnSync(cmd, [name], { stdio: "pipe" });
+		let result;
+		if (isWindows) {
+			// Use cmd.exe wrapper for Windows 'where' command
+			result = spawnSync("cmd.exe", ["/c", cmd, name], { stdio: "pipe" });
+		} else {
+			result = spawnSync(cmd, [name], { stdio: "pipe" });
+		}
 		return result.status === 0;
 	} catch {
 		return false;

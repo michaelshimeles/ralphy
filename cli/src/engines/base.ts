@@ -11,7 +11,13 @@ const isWindows = process.platform === "win32";
 function resolveCommand(command: string): string {
 	if (!isWindows || isBun) return command;
 	try {
-		const result = spawnSync("where", [command], { encoding: "utf8", stdio: "pipe" });
+		let result;
+		if (isBun) {
+			result = spawnSync("where", [command], { encoding: "utf8", stdio: "pipe" });
+		} else {
+			// Use cmd.exe wrapper for Windows
+			result = spawnSync("cmd.exe", ["/c", "where", command], { encoding: "utf8", stdio: "pipe" });
+		}
 		if (result.status !== 0) return command;
 		const paths = result.stdout.trim().split(/\r?\n/);
 		// Return first path (the one that would be executed)
@@ -35,7 +41,11 @@ export async function commandExists(command: string): Promise<boolean> {
 			const exitCode = await proc.exited;
 			return exitCode === 0;
 		}
-		// Node.js fallback - where/which don't need shell
+		// Node.js fallback - use shell wrapper on Windows for 'where' command
+		if (isWindows) {
+			const result = spawnSync("cmd.exe", ["/c", checkCommand, command], { stdio: "pipe" });
+			return result.status === 0;
+		}
 		const result = spawnSync(checkCommand, [command], { stdio: "pipe" });
 		return result.status === 0;
 	} catch {
