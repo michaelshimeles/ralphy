@@ -66,13 +66,13 @@ export class MarkdownFolderTaskSource implements TaskSource {
 		const allTasks: Task[] = [];
 
 		for (const filePath of this.markdownFiles) {
-			const content = readFileSync(filePath, "utf-8");
+			const content = readFileSync(filePath, "utf-8").replace(/\r/g, "");
 			const lines = content.split("\n");
 
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i];
 
-				// Match incomplete tasks
+				// Match incomplete tasks (handle CRLF line endings)
 				const incompleteMatch = line.match(/^- \[ \] (.+)$/);
 				if (incompleteMatch) {
 					allTasks.push({
@@ -95,12 +95,14 @@ export class MarkdownFolderTaskSource implements TaskSource {
 	async markComplete(id: string): Promise<void> {
 		const { filePath, lineNumber } = this.parseTaskId(id);
 		const content = readFileSync(filePath, "utf-8");
-		const lines = content.split("\n");
+		const normalizedContent = content.replace(/\r/g, "");
+		const lines = normalizedContent.split("\n");
 		const lineIndex = lineNumber - 1;
 
 		if (lineIndex >= 0 && lineIndex < lines.length) {
 			// Replace "- [ ]" with "- [x]"
 			lines[lineIndex] = lines[lineIndex].replace(/^- \[ \] /, "- [x] ");
+			// Write back with original line endings preserved
 			writeFileSync(filePath, lines.join("\n"), "utf-8");
 		}
 	}
@@ -109,7 +111,7 @@ export class MarkdownFolderTaskSource implements TaskSource {
 		let count = 0;
 
 		for (const filePath of this.markdownFiles) {
-			const content = readFileSync(filePath, "utf-8");
+			const content = readFileSync(filePath, "utf-8").replace(/\r/g, "");
 			const matches = content.match(/^- \[ \] /gm);
 			count += matches?.length || 0;
 		}
@@ -121,7 +123,7 @@ export class MarkdownFolderTaskSource implements TaskSource {
 		let count = 0;
 
 		for (const filePath of this.markdownFiles) {
-			const content = readFileSync(filePath, "utf-8");
+			const content = readFileSync(filePath, "utf-8").replace(/\r/g, "");
 			const matches = content.match(/^- \[x\] /gim);
 			count += matches?.length || 0;
 		}
