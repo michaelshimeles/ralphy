@@ -1,11 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { detectProject } from "./detector.ts";
-import {
-	getConfigPath,
-	getProgressPath,
-	getRalphyDir,
-} from "./loader.ts";
+import { getConfigPath, getProgressPath, getRalphyDir } from "./loader.ts";
 import type { RalphyConfig } from "./types.ts";
 
 /**
