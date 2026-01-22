@@ -54,6 +54,9 @@ GITHUB_LABEL=""
 # Browser automation (agent-browser)
 BROWSER_ENABLED="auto"  # auto, true, false
 
+# Log directory (if set, logs are saved persistently instead of temp files)
+LOG_DIR=""
+
 # Colors (detect if terminal supports colors)
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
   RED=$(tput setaf 1)
@@ -117,6 +120,28 @@ log_debug() {
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
+}
+
+# Get log file path - returns temp file if LOG_DIR not set, otherwise persistent path
+# Usage: get_log_file_path "task description" [agent_num]
+get_log_file_path() {
+  local task_desc="${1:-task}"
+  local agent_num="${2:-}"
+
+  if [[ -z "$LOG_DIR" ]]; then
+    # No log dir specified, use temp file (will be cleaned up)
+    mktemp
+  else
+    # Create timestamped log file in LOG_DIR
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
+    local task_slug
+    task_slug=$(slugify "$task_desc")
+    local filename="${timestamp}_${task_slug}"
+    [[ -n "$agent_num" ]] && filename="${filename}_agent-${agent_num}"
+    filename="${filename}.log"
+    echo "${LOG_DIR}/${filename}"
+  fi
 }
 
 # Check if agent-browser is available
@@ -608,11 +633,12 @@ run_brownfield_task() {
   local prompt
   prompt=$(build_brownfield_prompt "$task")
 
-  # Create temp file for output
+  # Create output file (temp or persistent based on LOG_DIR)
   local output_file
-  output_file=$(mktemp)
+  output_file=$(get_log_file_path "$task")
 
   log_info "Running with $AI_ENGINE..."
+  [[ -n "$LOG_DIR" ]] && log_info "Logging to: $output_file"
   if is_browser_available; then
     log_info "Browser automation enabled (agent-browser)"
   fi
@@ -667,7 +693,8 @@ run_brownfield_task() {
     log_error "Task failed"
   fi
 
-  rm -f "$output_file"
+  # Only delete output file if not using persistent log directory
+  [[ -z "$LOG_DIR" ]] && rm -f "$output_file"
   return $exit_code
 }
 
@@ -736,6 +763,10 @@ ${BOLD}PRD SOURCE OPTIONS:${RESET}
 ${BOLD}CAPABILITIES:${RESET}
   --browser           Enable browser automation (requires agent-browser)
   --no-browser        Disable browser automation
+
+${BOLD}LOGGING:${RESET}
+  --log-dir DIR       Save logs persistently to DIR (default: temp files, deleted)
+                      Each iteration saves: DIR/YYYY-MM-DD_HH-MM-SS_<task>.log
 
 ${BOLD}OTHER OPTIONS:${RESET}
   -v, --verbose       Show debug output
@@ -930,6 +961,13 @@ parse_args() {
         BROWSER_ENABLED="false"
         shift
         ;;
+      --log-dir)
+        [[ -z "${2:-}" ]] && { log_error "--log-dir requires a directory path"; exit 1; }
+        LOG_DIR="$2"
+        # Create directory if it doesn't exist
+        mkdir -p "$LOG_DIR" || { log_error "Cannot create log directory: $LOG_DIR"; exit 1; }
+        shift 2
+        ;;
       -*)
         log_error "Unknown option: $1"
         echo "Use --help for usage"
@@ -1119,8 +1157,8 @@ cleanup() {
   # Kill any remaining child processes
   pkill -P $$ 2>/dev/null || true
 
-  # Remove temp file
-  [[ -n "$tmpfile" ]] && rm -f "$tmpfile"
+  # Remove temp file (only if not using persistent log directory)
+  [[ -z "$LOG_DIR" ]] && [[ -n "$tmpfile" ]] && rm -f "$tmpfile"
   [[ -n "$CODEX_LAST_MESSAGE_FILE" ]] && rm -f "$CODEX_LAST_MESSAGE_FILE"
 
   # Cleanup parallel worktrees
@@ -1919,8 +1957,9 @@ run_single_task() {
     log_info "Working on branch: $branch_name"
   fi
 
-  # Temp file for AI output
-  tmpfile=$(mktemp)
+  # Output file for AI (temp or persistent based on LOG_DIR)
+  tmpfile=$(get_log_file_path "$current_task")
+  [[ -n "$LOG_DIR" ]] && log_info "Logging to: $tmpfile"
 
   # Build the prompt
   local prompt
@@ -1929,7 +1968,7 @@ run_single_task() {
   if [[ "$DRY_RUN" == true ]]; then
     log_info "DRY RUN - Would execute:"
     echo "${DIM}$prompt${RESET}"
-    rm -f "$tmpfile"
+    [[ -z "$LOG_DIR" ]] && rm -f "$tmpfile"
     tmpfile=""
     return_to_base_branch
     return 0
@@ -1969,7 +2008,7 @@ run_single_task() {
         sleep "$RETRY_DELAY"
         continue
       fi
-      rm -f "$tmpfile"
+      [[ -z "$LOG_DIR" ]] && rm -f "$tmpfile"
       tmpfile=""
       return_to_base_branch
       return 1
@@ -1985,7 +2024,7 @@ run_single_task() {
         sleep "$RETRY_DELAY"
         continue
       fi
-      rm -f "$tmpfile"
+      [[ -z "$LOG_DIR" ]] && rm -f "$tmpfile"
       tmpfile=""
       return_to_base_branch
       return 1
@@ -2032,7 +2071,7 @@ run_single_task() {
       fi
     fi
 
-    rm -f "$tmpfile"
+    [[ -z "$LOG_DIR" ]] && rm -f "$tmpfile"
     tmpfile=""
     if [[ "$AI_ENGINE" == "codex" ]] && [[ -n "$CODEX_LAST_MESSAGE_FILE" ]]; then
       rm -f "$CODEX_LAST_MESSAGE_FILE"
@@ -2195,9 +2234,13 @@ Instructions:
 Do NOT modify PRD.md or mark tasks complete - that will be handled separately.
 Focus only on implementing: $task_name"
 
-  # Temp file for AI output
+  # Output file for AI (temp or persistent based on LOG_DIR)
   local tmpfile
-  tmpfile=$(mktemp)
+  if [[ -n "$LOG_DIR" ]]; then
+    tmpfile=$(get_log_file_path "${task_name}-output" "$agent_num")
+  else
+    tmpfile=$(mktemp)
+  fi
 
   # Run AI agent in the worktree directory
   local result=""
@@ -2288,7 +2331,7 @@ Focus only on implementing: $task_name"
     sleep "$RETRY_DELAY"
   done
 
-  rm -f "$tmpfile"
+  [[ -z "$LOG_DIR" ]] && rm -f "$tmpfile"
 
   if [[ "$success" == true ]]; then
     # Parse tokens
@@ -2444,7 +2487,12 @@ run_parallel_tasks() {
 
         local status_file=$(mktemp)
         local output_file=$(mktemp)
-        local log_file=$(mktemp)
+        local log_file
+        if [[ -n "$LOG_DIR" ]]; then
+          log_file=$(get_log_file_path "$task" "$agent_num")
+        else
+          log_file=$(mktemp)
+        fi
 
         batch_tasks+=("$task")
         status_files+=("$status_file")
@@ -2594,8 +2642,9 @@ run_parallel_tasks() {
           echo "${DIM}    └─${RESET}"
         fi
 
-        # Cleanup temp files
-        rm -f "$status_file" "$output_file" "$log_file"
+        # Cleanup temp files (preserve log_file if LOG_DIR is set)
+        rm -f "$status_file" "$output_file"
+        [[ -z "$LOG_DIR" ]] && rm -f "$log_file"
       done
 
       batch_start=$batch_end
