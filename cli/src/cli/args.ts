@@ -13,7 +13,7 @@ export function createProgram(): Command {
 	program
 		.name("ralphy")
 		.description(
-			"Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid and Trae",
+			"Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid, GitHub Copilot and Trae",
 		)
 		.version(VERSION)
 		.argument("[task]", "Single task to execute (brownfield mode)")
