@@ -6,22 +6,6 @@ const isBun = typeof Bun !== "undefined";
 const isWindows = process.platform === "win32";
 
 /**
- * Resolve a command to its full executable path (needed for Windows)
- */
-function resolveCommand(command: string): string {
-	if (!isWindows || isBun) return command;
-	try {
-		const result = spawnSync("where", [command], { encoding: "utf8", stdio: "pipe" });
-		if (result.status !== 0) return command;
-		const paths = result.stdout.trim().split(/\r?\n/);
-		// Return first path (the one that would be executed)
-		return paths[0] || command;
-	} catch {
-		return command;
-	}
-}
-
-/**
  * Check if a command is available in PATH
  */
 export async function commandExists(command: string): Promise<boolean> {
@@ -53,7 +37,9 @@ export async function execCommand(
 	env?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 	if (isBun) {
-		const proc = Bun.spawn([command, ...args], {
+		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
+		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
+		const proc = Bun.spawn(spawnArgs, {
 			cwd: workDir,
 			stdout: "pipe",
 			stderr: "pipe",
@@ -69,13 +55,13 @@ export async function execCommand(
 		return { stdout, stderr, exitCode };
 	}
 
-	// Node.js fallback - resolve full path on Windows to avoid shell
-	const resolvedCommand = resolveCommand(command);
-	return new Promise((resolve) => {
-		const proc = spawn(resolvedCommand, args, {
+	// Node.js fallback - use shell on Windows to execute .cmd wrappers
+	return new Promise((resolve, reject) => {
+		const proc = spawn(command, args, {
 			cwd: workDir,
 			env: { ...process.env, ...env },
 			stdio: ["ignore", "pipe", "pipe"], // Close stdin, pipe stdout/stderr
+			shell: isWindows, // Required on Windows for npm global commands (.cmd wrappers)
 		});
 
 		let stdout = "";
@@ -93,8 +79,8 @@ export async function execCommand(
 			resolve({ stdout, stderr, exitCode: exitCode ?? 1 });
 		});
 
-		proc.on("error", () => {
-			resolve({ stdout, stderr, exitCode: 1 });
+		proc.on("error", (err) => {
+			reject(err);
 		});
 	});
 }
@@ -186,7 +172,9 @@ export async function execCommandStreaming(
 	env?: Record<string, string>,
 ): Promise<{ exitCode: number }> {
 	if (isBun) {
-		const proc = Bun.spawn([command, ...args], {
+		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
+		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
+		const proc = Bun.spawn(spawnArgs, {
 			cwd: workDir,
 			stdout: "pipe",
 			stderr: "pipe",
@@ -200,13 +188,13 @@ export async function execCommandStreaming(
 		return { exitCode };
 	}
 
-	// Node.js fallback - resolve full path on Windows to avoid shell
-	const resolvedCommand = resolveCommand(command);
-	return new Promise((resolve) => {
-		const proc = spawn(resolvedCommand, args, {
+	// Node.js fallback - use shell on Windows to execute .cmd wrappers
+	return new Promise((resolve, reject) => {
+		const proc = spawn(command, args, {
 			cwd: workDir,
 			env: { ...process.env, ...env },
 			stdio: ["ignore", "pipe", "pipe"], // Close stdin, pipe stdout/stderr
+			shell: isWindows, // Required on Windows for npm global commands (.cmd wrappers)
 		});
 
 		let stdoutBuffer = "";
@@ -238,8 +226,8 @@ export async function execCommandStreaming(
 			resolve({ exitCode: exitCode ?? 1 });
 		});
 
-		proc.on("error", () => {
-			resolve({ exitCode: 1 });
+		proc.on("error", (err) => {
+			reject(err);
 		});
 	});
 }
