@@ -4,6 +4,7 @@ import {
 	detectStepFromOutput,
 	execCommand,
 	execCommandStreaming,
+	logVerboseEvent,
 	parseStreamJsonResult,
 } from "./base.ts";
 import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
@@ -37,15 +38,21 @@ export class ClaudeEngine extends BaseAIEngine {
 			args.push("-p", prompt);
 		}
 
-		const { stdout, stderr, exitCode } = await execCommand(
+		const outputLines: string[] = [];
+
+		const { exitCode } = await execCommandStreaming(
 			this.cliCommand,
 			args,
 			workDir,
+			(line) => {
+				outputLines.push(line);
+				logVerboseEvent(line);
+			},
 			undefined,
 			stdinContent,
 		);
 
-		const output = stdout + stderr;
+		const output = outputLines.join("\n");
 
 		// Check for errors
 		const error = checkForErrors(output);
@@ -114,6 +121,9 @@ export class ClaudeEngine extends BaseAIEngine {
 			workDir,
 			(line) => {
 				outputLines.push(line);
+
+				// Log detailed execution steps if verbose
+				logVerboseEvent(line);
 
 				// Detect and report step changes
 				const step = detectStepFromOutput(line);

@@ -1,4 +1,10 @@
-import { BaseAIEngine, checkForErrors, execCommand } from "./base.ts";
+import {
+	BaseAIEngine,
+	checkForErrors,
+	execCommand,
+	execCommandStreaming,
+	logVerboseEvent,
+} from "./base.ts";
 import type { AIResult, EngineOptions } from "./types.ts";
 
 const isWindows = process.platform === "win32";
@@ -28,15 +34,21 @@ export class OpenCodeEngine extends BaseAIEngine {
 			args.push(prompt);
 		}
 
-		const { stdout, stderr, exitCode } = await execCommand(
+		const outputLines: string[] = [];
+
+		const { exitCode } = await execCommandStreaming(
 			this.cliCommand,
 			args,
 			workDir,
+			(line) => {
+				outputLines.push(line);
+				logVerboseEvent(line);
+			},
 			{ OPENCODE_PERMISSION: '{"*":"allow"}' },
 			stdinContent,
 		);
 
-		const output = stdout + stderr;
+		const output = outputLines.join("\n");
 
 		// Check for errors
 		const error = checkForErrors(output);

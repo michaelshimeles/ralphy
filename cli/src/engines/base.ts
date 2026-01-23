@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { logDebug } from "../ui/logger.ts";
 import type { AIEngine, AIResult, EngineOptions, ProgressCallback } from "./types.ts";
 
 // Check if running in Bun
@@ -264,6 +265,56 @@ export async function execCommandStreaming(
 			resolve({ exitCode: 1 });
 		});
 	});
+}
+
+/**
+ * Log detailed event information if in verbose mode
+ */
+export function logVerboseEvent(line: string): void {
+	// Fast path: skip non-JSON lines
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("{")) {
+		return;
+	}
+
+	try {
+		const parsed = JSON.parse(trimmed);
+
+		// 1. Log Chain of Thought
+		// OpenCode/Claude might use different fields for reasoning
+		const thought =
+			parsed.thought || parsed.reasoning || (parsed.type === "thought" ? parsed.content : null);
+		if (thought) {
+			logDebug(`Thinking: ${thought}`);
+			return;
+		}
+
+		// 2. Log Tool Calls
+		// Handle various formats (OpenCode, Claude, etc.)
+		if (parsed.type === "tool_use" || parsed.tool) {
+			const toolName = parsed.tool || parsed.name || parsed.tool_name;
+			const toolInput = parsed.input || parsed.arguments || parsed.args;
+
+			if (toolName) {
+				logDebug(`Tool Call: ${toolName}`);
+				if (toolInput) {
+					logDebug(
+						`   Input: ${typeof toolInput === "string" ? toolInput : JSON.stringify(toolInput)}`,
+					);
+				}
+			}
+			return;
+		}
+
+		// 3. Log Tool Results (optional)
+		if (parsed.type === "tool_result") {
+			logDebug(
+				`Tool Result: ${parsed.tool_name || parsed.name || "Unknown"} (Status: ${parsed.is_error ? "Error" : "Success"})`,
+			);
+		}
+	} catch {
+		// Ignore
+	}
 }
 
 /**
