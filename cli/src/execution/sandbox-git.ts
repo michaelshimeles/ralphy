@@ -22,7 +22,7 @@ class GitMutex {
 		try {
 			return await fn();
 		} finally {
-			release!();
+			release?.();
 		}
 	}
 }
@@ -162,10 +162,7 @@ export async function hasSandboxChanges(
  * Initialize git configuration in sandbox (if needed).
  * This is mainly for agents that require git to be present.
  */
-export async function initSandboxGit(
-	sandboxDir: string,
-	originalDir: string,
-): Promise<void> {
+export async function initSandboxGit(sandboxDir: string, originalDir: string): Promise<void> {
 	// The .git directory should already be symlinked from createSandbox
 	// This function is here for any additional git setup needed
 

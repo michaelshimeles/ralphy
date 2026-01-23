@@ -23,6 +23,14 @@ export function detectProject(workDir = process.cwd()): DetectedProject {
 		buildCmd: "",
 	};
 
+	// Check for PHP projects first (Laravel, Symfony, etc.)
+	// PHP projects often have package.json for frontend assets, so check composer.json first
+	const composerPath = join(workDir, "composer.json");
+	if (existsSync(composerPath)) {
+		detectPhpProject(workDir, composerPath, result);
+		return result;
+	}
+
 	// Check for package.json (Node.js/JavaScript/TypeScript)
 	const packageJsonPath = join(workDir, "package.json");
 	if (existsSync(packageJsonPath)) {
@@ -148,4 +156,66 @@ function detectRustProject(result: DetectedProject): void {
 	result.testCmd = "cargo test";
 	result.lintCmd = "cargo clippy";
 	result.buildCmd = "cargo build";
+}
+
+function detectPhpProject(workDir: string, composerPath: string, result: DetectedProject): void {
+	result.language = "PHP";
+
+	try {
+		const content = readFileSync(composerPath, "utf-8");
+		const composer = JSON.parse(content);
+
+		// Get name from composer.json
+		if (composer.name) {
+			result.name = composer.name;
+		}
+
+		// Get all dependencies
+		const deps = { ...(composer.require || {}), ...(composer["require-dev"] || {}) };
+		const depNames = Object.keys(deps);
+
+		// Detect frameworks
+		const frameworks: string[] = [];
+		if (depNames.includes("laravel/framework")) frameworks.push("Laravel");
+		if (depNames.includes("symfony/framework-bundle")) frameworks.push("Symfony");
+		if (depNames.includes("slim/slim")) frameworks.push("Slim");
+
+		result.framework = frameworks.join(", ");
+
+		// Detect test command
+		if (depNames.includes("pestphp/pest")) {
+			result.testCmd = "./vendor/bin/pest";
+		} else if (depNames.includes("phpunit/phpunit")) {
+			result.testCmd = "./vendor/bin/phpunit";
+		}
+		// Laravel projects with artisan can use `php artisan test`
+		if (existsSync(join(workDir, "artisan")) && frameworks.includes("Laravel")) {
+			result.testCmd = "php artisan test";
+		}
+
+		// Detect lint command
+		if (depNames.includes("laravel/pint")) {
+			result.lintCmd = "./vendor/bin/pint";
+		} else if (depNames.includes("phpstan/phpstan")) {
+			result.lintCmd = "./vendor/bin/phpstan analyse";
+		} else if (depNames.includes("squizlabs/php_codesniffer")) {
+			result.lintCmd = "./vendor/bin/phpcs";
+		}
+
+		// Build command (Laravel Mix/Vite for assets)
+		const packageJsonPath = join(workDir, "package.json");
+		if (existsSync(packageJsonPath)) {
+			try {
+				const pkgContent = readFileSync(packageJsonPath, "utf-8");
+				const pkg = JSON.parse(pkgContent);
+				if (pkg.scripts?.build) {
+					result.buildCmd = "npm run build";
+				}
+			} catch {
+				// Ignore package.json parsing errors
+			}
+		}
+	} catch {
+		// Ignore parsing errors
+	}
 }

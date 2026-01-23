@@ -8,8 +8,8 @@ import {
 	readlinkSync,
 	rmSync,
 	statSync,
-	utimesSync,
 	symlinkSync,
+	utimesSync,
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { logDebug } from "../ui/logger.ts";
@@ -214,7 +214,6 @@ export function verifySandboxIsolation(sandboxDir: string, symlinkDirs: string[]
 				const stat = lstatSync(sandboxPath);
 				if (stat.isSymbolicLink()) {
 					// Good - it's a symlink
-					continue;
 				}
 			} catch {
 				// Error checking - assume not isolated

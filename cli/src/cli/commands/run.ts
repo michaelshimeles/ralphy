@@ -8,7 +8,6 @@ import { runParallel } from "../../execution/parallel.ts";
 import { type ExecutionResult, runSequential } from "../../execution/sequential.ts";
 import { getDefaultBaseBranch } from "../../git/branch.ts";
 import { sendNotifications } from "../../notifications/webhook.ts";
-import { createTaskSource } from "../../tasks/index.ts";
 import { CachedTaskSource, createTaskSource } from "../../tasks/index.ts";
 import {
 	formatDuration,

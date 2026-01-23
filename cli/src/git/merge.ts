@@ -61,8 +61,7 @@ export async function mergeAgentBranch(
 ): Promise<MergeResult> {
 	const git: SimpleGit = simpleGit(workDir);
 	const potentialConflictFiles = await getPotentialConflictFiles(branchName, targetBranch, workDir);
-	const potentialConflicts =
-		potentialConflictFiles.length > 0 ? potentialConflictFiles : undefined;
+	const potentialConflicts = potentialConflictFiles.length > 0 ? potentialConflictFiles : undefined;
 
 	try {
 		// Checkout target branch
@@ -310,9 +309,7 @@ export function calculateConflictScore(
  * Sort branches by conflict likelihood (lowest first).
  * Branches that touch fewer shared files should merge first.
  */
-export function sortByConflictLikelihood(
-	analyses: PreMergeAnalysis[],
-): PreMergeAnalysis[] {
+export function sortByConflictLikelihood(analyses: PreMergeAnalysis[]): PreMergeAnalysis[] {
 	// Calculate conflict scores for each branch
 	const withScores = analyses.map((analysis) => ({
 		analysis,
