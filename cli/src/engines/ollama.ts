@@ -131,11 +131,13 @@ export class OllamaEngine extends BaseAIEngine {
 			ANTHROPIC_BASE_URL: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
 		};
 
-		const { stdout, stderr, exitCode } = await execCommandStreaming(
+		const outputLines: string[] = [];
+		const { exitCode } = await execCommandStreaming(
 			this.cliCommand,
 			args,
 			workDir,
 			(chunk, step) => {
+				outputLines.push(chunk);
 				if (onProgress) {
 					const detectedStep = detectStepFromOutput(chunk);
 					onProgress(chunk, detectedStep || step);
@@ -144,8 +146,7 @@ export class OllamaEngine extends BaseAIEngine {
 			ollamaEnv,
 			stdinContent,
 		);
-
-		const output = stdout + stderr;
+		const output = outputLines.join("\n");
 
 		// Check for errors
 		const error = checkForErrors(output);
