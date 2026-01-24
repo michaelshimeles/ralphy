@@ -27,7 +27,7 @@ AUTO_COMMIT=true
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, or copilot
+AI_ENGINE="claude"  # claude, opencode, cursor, ollama(via claude code cli), codex, qwen, droid, or copilot
 MODEL_OVERRIDE=""   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
@@ -649,6 +649,14 @@ run_brownfield_task() {
         ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
         2>&1 | tee "$output_file"
       ;;
+    ollama)
+      ANTHROPIC_AUTH_TOKEN=ollama \
+      ANTHROPIC_API_KEY="" \
+      ANTHROPIC_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}" \
+      claude --dangerously-skip-permissions \
+        --model "${MODEL_OVERRIDE:-qwen3-coder}" \
+        -p "$prompt" 2>&1 | tee "$output_file"
+      ;;
     codex)
       codex exec --full-auto \
         --json \
@@ -701,6 +709,7 @@ ${BOLD}AI ENGINE OPTIONS:${RESET}
   --qwen              Use Qwen-Code
   --droid             Use Factory Droid
   --copilot           Use GitHub Copilot
+  --ollama            Use Ollama (local models via Claude Code CLI)
   --model <name>      Override default model for any engine
                       Claude: sonnet, haiku, opus
                       OpenCode: gpt-4o, gpt-4o-mini, o1, o3-mini
@@ -828,6 +837,10 @@ parse_args() {
         ;;
       --copilot)
         AI_ENGINE="copilot"
+        shift
+        ;;
+      --ollama)
+        AI_ENGINE="ollama"
         shift
         ;;
       --model)

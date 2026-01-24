@@ -88,6 +88,7 @@ ralphy --codex      # Codex
 ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
+ralphy --ollama     # Ollama (local models)
 ```
 
 ### Model Override
@@ -99,6 +100,7 @@ ralphy --model sonnet "add feature"                    # use sonnet with Claude
 ralphy --sonnet "add feature"                          # shortcut for above
 ralphy --opencode --model opencode/glm-4.7-free "task" # custom OpenCode model
 ralphy --qwen --model qwen-max "build api"             # custom Qwen model
+ralphy --ollama --model glm-4.7 "add feature"          # use Ollama with specific model
 ```
 
 ### Engine-Specific Arguments
@@ -308,7 +310,7 @@ ralphy --parallel --sandbox
 ## Requirements
 
 **Required:**
-- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), or [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli)
+- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli), or [Ollama](https://ollama.com) (requires Claude Code CLI)
 
 **npm version (`ralphy-cli`):**
 - Node.js 18+ or Bun
@@ -333,12 +335,18 @@ ralphy --parallel --sandbox
 | Qwen | `qwen` | `--approval-mode yolo` | tokens |
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `-p` flag | duration |
+| Ollama | `claude` | `--dangerously-skip-permissions` | tokens + cost |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 
 ---
 
 ## Changelog
+
+### v4.6.0
+- **Ollama support**: use local models via Ollama's Anthropic-compatible API (`--ollama`)
+- recommended models: `qwen3-coder`, `glm-4.7`, `gpt-oss:20b`, `gpt-oss:120b`
+- requires [Ollama](https://ollama.com) running locally and Claude Code CLI installed
 
 ### v4.5.3
 - parallel reliability: fallback to sandbox mode on worktree errors
