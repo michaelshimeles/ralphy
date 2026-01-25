@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            binary: ralphy-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            binary: ralphy-linux-arm64
+          - os: macos-latest
+            target: darwin-x64
+            binary: ralphy-darwin-x64
+          - os: macos-latest
+            target: darwin-arm64
+            binary: ralphy-darwin-arm64
+          - os: windows-latest
+            target: windows-x64
+            binary: ralphy-windows-x64.exe
+            
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+        
+    - name: Install dependencies
+      run: bun install
+      
+    - name: Run tests
+      run: bun test
+      
+    - name: Build binary
+      run: bun run build:${{ matrix.target }}
+      
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./dist/${{ matrix.binary }}
+        asset_name: ${{ matrix.binary }}
+        asset_content_type: application/octet-stream

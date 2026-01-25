@@ -16,6 +16,7 @@
 		"dev": "bun run src/index.ts",
 		"test": "bun test",
 		"test:watch": "bun test --watch",
+		"test:ci": "bun test --coverage",
 		"typecheck": "bunx tsc --noEmit",
 		"lint": "biome check src/**/*.ts",
 		"lint:fix": "biome check --write src/**/*.ts",
@@ -28,6 +29,8 @@
 		"build:windows-x64": "bun build src/index.ts --compile --minify --target=bun-windows-x64 --outfile dist/ralphy-windows-x64.exe",
 		"build:all": "bun run build:darwin-arm64 && bun run build:darwin-x64 && bun run build:linux-x64 && bun run build:linux-arm64 && bun run build:windows-x64",
 		"check": "biome check --write .",
+		"security": "bun test __tests__/sandbox-security.test.ts __tests__/locking-security.test.ts",
+		"ci": "bun run typecheck && bun run check && bun run test:ci && bun run security",
 		"prepublishOnly": "bun run build:all"
 	},
 	"keywords": [
