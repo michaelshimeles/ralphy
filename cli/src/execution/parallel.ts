@@ -1,9 +1,6 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import simpleGit from "simple-git";
-import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
-import type { AIEngine, AIResult } from "../engines/types.ts";
+import type { AIEngine } from "../engines/types.ts";
 import { getCurrentBranch, returnToBaseBranch } from "../git/branch.ts";
 import {
 	abortMerge,
@@ -12,232 +9,59 @@ import {
 	mergeAgentBranch,
 	sortByConflictLikelihood,
 } from "../git/merge.ts";
-import {
-	canUseWorktrees,
-	cleanupAgentWorktree,
-	createAgentWorktree,
-	getWorktreeBase,
-} from "../git/worktree.ts";
+import { canUseWorktrees, cleanupAgentWorktree, getWorktreeBase } from "../git/worktree.ts";
 import { CachedTaskSource } from "../tasks/cached-task-source.ts";
 import type { Task } from "../tasks/types.ts";
 import { YamlTaskSource } from "../tasks/yaml.ts";
-import { formatDuration, logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
+import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
+import { StaticAgentDisplay } from "../ui/static-agent-display.ts";
+import { type AgentRunnerOptions, runAgentInSandbox, runAgentInWorktree } from "./agent-runner.ts";
 import { resolveConflictsWithAI } from "./conflict-resolution.ts";
-import { clearDeferredTask, recordDeferredTask } from "./deferred.ts";
-import { buildParallelPrompt } from "./prompt.ts";
-import { isRetryableError, withRetry } from "./retry.ts";
+import { clearDeferredTask } from "./deferred.ts";
+import {
+	batchByColor,
+	buildConflictGraph,
+	colorGraph,
+	type PlannedTask,
+} from "./graph-coloring.ts";
+import { acquireFileLock, releaseFileLock } from "./locking.ts";
+import { isRetryableError } from "./retry.ts";
+import { cleanupSandbox, getModifiedFiles, getSandboxBase } from "./sandbox.ts";
 import { commitSandboxChanges } from "./sandbox-git.ts";
-import { cleanupSandbox, createSandbox, getModifiedFiles, getSandboxBase } from "./sandbox.ts";
 import type { ExecutionOptions, ExecutionResult } from "./sequential.ts";
 
-interface ParallelAgentResult {
-	task: Task;
-	agentNum: number;
-	worktreeDir: string;
-	branchName: string;
-	result: AIResult | null;
-	error?: string;
-	/** Whether this agent used sandbox mode */
-	usedSandbox?: boolean;
-}
+const MERGE_LOCK_FILE = ".ralphy-merge.lock";
 
 /**
- * Run a single agent in a worktree
+ * Convert Task to PlannedTask for graph coloring by extracting file information.
+ * Uses planning analysis if available, otherwise defaults to empty file list.
  */
-async function runAgentInWorktree(
-	engine: AIEngine,
-	task: Task,
-	agentNum: number,
-	baseBranch: string,
-	worktreeBase: string,
-	originalDir: string,
-	prdSource: string,
-	prdFile: string,
-	prdIsFolder: boolean,
-	maxRetries: number,
-	retryDelay: number,
-	skipTests: boolean,
-	skipLint: boolean,
-	browserEnabled: "auto" | "true" | "false",
-	modelOverride?: string,
-	engineArgs?: string[],
-): Promise<ParallelAgentResult> {
-	let worktreeDir = "";
-	let branchName = "";
+function taskToPlannedTask(task: Task, planningAnalysis?: string): PlannedTask {
+	let files: string[] = [];
 
-	try {
-		// Create worktree
-		const worktree = await createAgentWorktree(
-			task.title,
-			agentNum,
-			baseBranch,
-			worktreeBase,
-			originalDir,
-		);
-		worktreeDir = worktree.worktreeDir;
-		branchName = worktree.branchName;
-
-		logDebug(`Agent ${agentNum}: Created worktree at ${worktreeDir}`);
-
-		// Copy PRD file or folder to worktree
-		if (prdSource === "markdown" || prdSource === "yaml") {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(worktreeDir, prdFile);
-			if (existsSync(srcPath)) {
-				copyFileSync(srcPath, destPath);
+	if (planningAnalysis) {
+		try {
+			const fileMatch = planningAnalysis.match(/files:?\s*\[([^\]]+)\]/i);
+			if (fileMatch) {
+				files = fileMatch[1].split(",").map((f) => f.trim().replace(/['"]/g, ""));
 			}
-		} else if (prdSource === "markdown-folder" && prdIsFolder) {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(worktreeDir, prdFile);
-			if (existsSync(srcPath)) {
-				cpSync(srcPath, destPath, { recursive: true });
-			}
+		} catch (e) {
+			logDebug(`Failed to extract files from planning analysis: ${e}`);
 		}
-
-		// Ensure .ralphy/ exists in worktree
-		const ralphyDir = join(worktreeDir, RALPHY_DIR);
-		if (!existsSync(ralphyDir)) {
-			mkdirSync(ralphyDir, { recursive: true });
-		}
-
-		// Build prompt
-		const prompt = buildParallelPrompt({
-			task: task.title,
-			progressFile: PROGRESS_FILE,
-			prdFile,
-			skipTests,
-			skipLint,
-			browserEnabled,
-		});
-
-		// Execute with retry
-		const engineOptions = {
-			...(modelOverride && { modelOverride }),
-			...(engineArgs && engineArgs.length > 0 && { engineArgs }),
-		};
-		const result = await withRetry(
-			async () => {
-				const res = await engine.execute(prompt, worktreeDir, engineOptions);
-				if (!res.success && res.error && isRetryableError(res.error)) {
-					throw new Error(res.error);
-				}
-				return res;
-			},
-			{ maxRetries, retryDelay },
-		);
-
-		return { task, agentNum, worktreeDir, branchName, result };
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		return { task, agentNum, worktreeDir, branchName, result: null, error: errorMsg };
 	}
-}
 
-/**
- * Run a single agent in a lightweight sandbox.
- *
- * Sandboxes use symlinks for read-only dependencies (node_modules, .git, etc.)
- * and copy source files. This is much faster than git worktrees for large repos.
- */
-async function runAgentInSandbox(
-	engine: AIEngine,
-	task: Task,
-	agentNum: number,
-	sandboxBase: string,
-	originalDir: string,
-	prdSource: string,
-	prdFile: string,
-	prdIsFolder: boolean,
-	maxRetries: number,
-	retryDelay: number,
-	skipTests: boolean,
-	skipLint: boolean,
-	browserEnabled: "auto" | "true" | "false",
-	modelOverride?: string,
-	engineArgs?: string[],
-): Promise<ParallelAgentResult> {
-	const uniqueSuffix = Math.random().toString(36).substring(2, 8);
-	const sandboxDir = join(sandboxBase, `agent-${agentNum}-${uniqueSuffix}`);
-	const branchName = "";
-
-	try {
-		// Create sandbox
-		const sandboxResult = await createSandbox({
-			originalDir,
-			sandboxDir,
-			agentNum,
-		});
-
-		logDebug(
-			`Agent ${agentNum}: Created sandbox (${sandboxResult.symlinksCreated} symlinks, ${sandboxResult.filesCopied} copies)`,
-		);
-
-		// Copy PRD file or folder to sandbox (same as worktree mode)
-		if (prdSource === "markdown" || prdSource === "yaml") {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(sandboxDir, prdFile);
-			if (existsSync(srcPath)) {
-				copyFileSync(srcPath, destPath);
-			}
-		} else if (prdSource === "markdown-folder" && prdIsFolder) {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(sandboxDir, prdFile);
-			if (existsSync(srcPath)) {
-				cpSync(srcPath, destPath, { recursive: true });
-			}
-		}
-
-		// Ensure .ralphy/ exists in sandbox
-		const ralphyDir = join(sandboxDir, RALPHY_DIR);
-		if (!existsSync(ralphyDir)) {
-			mkdirSync(ralphyDir, { recursive: true });
-		}
-
-		// Build prompt
-		const prompt = buildParallelPrompt({
-			task: task.title,
-			progressFile: PROGRESS_FILE,
-			prdFile,
-			skipTests,
-			skipLint,
-			browserEnabled,
-			allowCommit: false,
-		});
-
-		// Execute with retry
-		const engineOptions = {
-			...(modelOverride && { modelOverride }),
-			...(engineArgs && engineArgs.length > 0 && { engineArgs }),
-		};
-		const result = await withRetry(
-			async () => {
-				const res = await engine.execute(prompt, sandboxDir, engineOptions);
-				if (!res.success && res.error && isRetryableError(res.error)) {
-					throw new Error(res.error);
-				}
-				return res;
-			},
-			{ maxRetries, retryDelay },
-		);
-
-		return { task, agentNum, worktreeDir: sandboxDir, branchName, result, usedSandbox: true };
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		return {
-			task,
-			agentNum,
-			worktreeDir: sandboxDir,
-			branchName,
-			result: null,
-			error: errorMsg,
-			usedSandbox: true,
-		};
-	}
+	return {
+		task,
+		files,
+	};
 }
 
 /**
  * Run tasks in parallel using worktrees or sandboxes
+ *
+ * @param options - Execution options including maxParallel, taskSource, etc.
+ * @returns Execution result with completed/failed task counts
  */
 export async function runParallel(
 	options: ExecutionOptions & {
@@ -267,12 +91,11 @@ export async function runParallel(
 		skipMerge,
 		useSandbox = false,
 		engineArgs,
+		debug,
+		debugOpenCode,
+		planningModel,
+		noGitParallel,
 	} = options;
-
-	const shouldFallbackToSandbox = (error: string | undefined): boolean => {
-		if (!error) return false;
-		return error.includes(".git/worktrees") || error.toLowerCase().includes("invalid path");
-	};
 
 	const result: ExecutionResult = {
 		tasksCompleted: 0,
@@ -289,7 +112,8 @@ export async function runParallel(
 	}
 
 	const isolationBase = effectiveUseSandbox ? getSandboxBase(workDir) : getWorktreeBase(workDir);
-	logDebug(`${effectiveUseSandbox ? "Sandbox" : "Worktree"} base: ${isolationBase}`);
+	const isolationMode = effectiveUseSandbox ? "sandbox" : "worktree";
+	logDebug(`${isolationMode} base: ${isolationBase}`);
 
 	if (effectiveUseSandbox) {
 		logInfo("Using lightweight sandbox mode (faster for large repos)");
@@ -306,96 +130,121 @@ export async function runParallel(
 
 	// Global agent counter to ensure unique numbering across batches
 	let globalAgentNum = 0;
+	const getNextAgentNum = () => ++globalAgentNum;
 
 	// Track processed tasks in dry-run mode (since we don't modify the source file)
 	const dryRunProcessedIds = new Set<string>();
 
+	// Static agent display for rich output
+	const staticAgentDisplay = new StaticAgentDisplay();
+	staticAgentDisplay.startDisplay();
+
 	// Process tasks in batches
 	let iteration = 0;
 
-	while (true) {
-		// Check iteration limit
-		if (maxIterations > 0 && iteration >= maxIterations) {
-			logInfo(`Reached max iterations (${maxIterations})`);
-			break;
-		}
-
-		// Get tasks for this batch
-		let tasks: Task[] = [];
-
-		// For YAML sources, try to get tasks from the same parallel group
-		// Support both direct YamlTaskSource and CachedTaskSource wrapping YamlTaskSource
-		const isYamlSource =
-			taskSource instanceof YamlTaskSource ||
-			(taskSource instanceof CachedTaskSource && taskSource.isYamlSource());
-
-		if (isYamlSource) {
-			// In dry-run mode, find the first task not already processed
-			let nextTask = await taskSource.getNextTask();
-			if (dryRun && nextTask && dryRunProcessedIds.has(nextTask.id)) {
-				const allTasks = await taskSource.getAllTasks();
-				nextTask = allTasks.find((t) => !dryRunProcessedIds.has(t.id)) || null;
+	try {
+		while (true) {
+			// Check iteration limit
+			if (maxIterations > 0 && iteration >= maxIterations) {
+				logInfo(`Reached max iterations (${maxIterations})`);
+				break;
 			}
-			if (!nextTask) break;
 
-			// Get parallel group - works for both direct and cached sources
-			const group = await taskSource.getParallelGroup(nextTask.title);
+			// Get tasks for this batch
+			let tasks: Task[] = [];
 
-			if (group > 0) {
-				tasks = await taskSource.getTasksInGroup(group);
+			// For YAML sources, try to get tasks from the same parallel group
+			// Support both direct YamlTaskSource and CachedTaskSource wrapping YamlTaskSource
+			const isYamlSource =
+				taskSource instanceof YamlTaskSource ||
+				(taskSource instanceof CachedTaskSource && taskSource.isYamlSource());
+
+			if (isYamlSource) {
+				// In dry-run mode, find the first task not already processed
+				let nextTask = await taskSource.getNextTask();
+				if (dryRun && nextTask && dryRunProcessedIds.has(nextTask.id)) {
+					const allTasks = await taskSource.getAllTasks();
+					nextTask = allTasks.find((t) => !dryRunProcessedIds.has(t.id)) || null;
+				}
+				if (!nextTask) break;
+
+				// Get parallel group - works for both direct and cached sources
+				const group = await taskSource.getParallelGroup(nextTask.title);
+
+				if (group > 0) {
+					tasks = await taskSource.getTasksInGroup(group);
+					// Filter out already processed tasks in dry-run mode
+					if (dryRun) {
+						tasks = tasks.filter((t) => !dryRunProcessedIds.has(t.id));
+					}
+				} else {
+					tasks = [nextTask];
+				}
+			} else {
+				// For other sources, get all remaining tasks
+				tasks = await taskSource.getAllTasks();
 				// Filter out already processed tasks in dry-run mode
 				if (dryRun) {
 					tasks = tasks.filter((t) => !dryRunProcessedIds.has(t.id));
 				}
+			}
+
+			if (tasks.length === 0) {
+				logSuccess("All tasks completed!");
+				break;
+			}
+
+			// Use graph coloring for optimal batching when tasks have file information
+			let batch: Task[];
+			const plannedTasks = tasks.map((t) => taskToPlannedTask(t));
+			const tasksWithFiles = plannedTasks.filter((pt) => pt.files.length > 0);
+
+			if (tasksWithFiles.length === tasks.length && tasksWithFiles.length > 1) {
+				logDebug("Using graph coloring for conflict-aware batching...");
+				const graph = buildConflictGraph(plannedTasks);
+				const colors = colorGraph(plannedTasks, graph);
+				const batches = batchByColor(plannedTasks, colors, maxParallel);
+
+				const batchKeys = Array.from(batches.keys()).sort((a, b) => a - b);
+				if (batchKeys.length > 0) {
+					const firstBatch = batches.get(batchKeys[0]);
+					batch = firstBatch?.map((pt) => pt.task) || [];
+					logInfo(
+						`Graph coloring created ${batchKeys.length} batch(es), using batch 1 with ${batch.length} tasks`,
+					);
+				} else {
+					batch = tasks.slice(0, maxParallel);
+				}
 			} else {
-				tasks = [nextTask];
+				batch = tasks.slice(0, maxParallel);
 			}
-		} else {
-			// For other sources, get all remaining tasks
-			tasks = await taskSource.getAllTasks();
-			// Filter out already processed tasks in dry-run mode
-			if (dryRun) {
-				tasks = tasks.filter((t) => !dryRunProcessedIds.has(t.id));
+			iteration++;
+
+			logInfo(`Batch ${iteration}: ${batch.length} tasks in parallel`);
+
+			if (dryRun && !options.debugOpenCode) {
+				logInfo("(dry run) Skipping batch");
+				// Track processed tasks to avoid infinite loop
+				for (const task of batch) {
+					dryRunProcessedIds.add(task.id);
+				}
+				continue;
 			}
-		}
 
-		if (tasks.length === 0) {
-			logSuccess("All tasks completed!");
-			break;
-		}
-
-		// Limit to maxParallel
-		const batch = tasks.slice(0, maxParallel);
-		iteration++;
-
-		const batchStartTime = Date.now();
-		logInfo(`Batch ${iteration}: ${batch.length} tasks in parallel`);
-
-		if (dryRun) {
-			logInfo("(dry run) Skipping batch");
-			// Track processed tasks to avoid infinite loop
+			// Initialize agent progress map for static display
 			for (const task of batch) {
-				dryRunProcessedIds.add(task.id);
+				const agentNum = getNextAgentNum();
+				staticAgentDisplay.setAgentStatus(agentNum, task.title, "working");
 			}
-			continue;
-		}
 
-		// Log task names being processed
-		for (const task of batch) {
-			logInfo(`  -> ${task.title}`);
-		}
-
-		// Run agents in parallel (using sandbox or worktree mode)
-		const promises = batch.map((task) => {
-			globalAgentNum++;
-
-			const runInSandbox = () =>
-				runAgentInSandbox(
+			// Parallel execution
+			const promises = batch.map((task) => {
+				const agentNum = globalAgentNum - (batch.length - batch.indexOf(task) - 1);
+				const agentOptions: AgentRunnerOptions = {
 					engine,
 					task,
-					globalAgentNum,
-					getSandboxBase(workDir),
-					workDir,
+					agentNum,
+					originalDir: workDir,
 					prdSource,
 					prdFile,
 					prdIsFolder,
@@ -405,260 +254,229 @@ export async function runParallel(
 					skipLint,
 					browserEnabled,
 					modelOverride,
+					planningModel,
 					engineArgs,
+					env: options.env,
+					debug,
+					debugOpenCode,
+					logThoughts: options.logThoughts,
+					onProgress: (step) => {
+						staticAgentDisplay.updateAgent(agentNum, step);
+					},
+					dryRun,
+					noGitParallel: effectiveUseSandbox && noGitParallel,
+				};
+
+				if (effectiveUseSandbox) {
+					return runAgentInSandbox(getSandboxBase(workDir), agentOptions);
+				}
+
+				return runAgentInWorktree(getWorktreeBase(workDir), originalBaseBranch, agentOptions);
+			});
+
+			const results = await Promise.allSettled(promises);
+
+			// Process all results
+			let sawRetryableFailure = false;
+			const worktreesToCleanup: Array<{ worktreeDir: string; branchName: string }> = [];
+			const allErrors: Array<{ task: Task; error: string }> = [];
+
+			for (let i = 0; i < results.length; i++) {
+				const res = results[i];
+				const task = batch[i];
+
+				if (res.status === "rejected") {
+					const error = res.reason;
+					allErrors.push({ task, error: String(error) });
+					logError(`Task "${task.title}" failed: ${error}`);
+					logTaskProgress(task.title, "failed", workDir);
+					result.tasksFailed++;
+					notifyTaskFailed(task.title, String(error));
+
+					// Optional: Mark as complete or defer depending on retry logic
+					// For simplicity here, we mark as complete if it's a hard rejection
+					await taskSource.markComplete(task.id);
+					clearDeferredTask(taskSource.type, task, workDir, prdFile);
+					continue;
+				}
+
+				const agentResult = res.value;
+				const {
+					agentNum,
+					worktreeDir,
+					branchName,
+					result: aiResult,
+					error: failureReason,
+					usedSandbox: agentUsedSandbox,
+				} = agentResult;
+
+				staticAgentDisplay.agentComplete(agentNum);
+
+				let finalBranchName = branchName;
+				let finalFailureReason = failureReason;
+				let preserveSandbox = false;
+
+				// Handle sandbox commit if successful
+				if (!finalFailureReason && aiResult?.success && agentUsedSandbox && worktreeDir) {
+					try {
+						const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
+						if (modifiedFiles.length > 0) {
+							const commitResult = await commitSandboxChanges(
+								workDir,
+								modifiedFiles,
+								worktreeDir,
+								task.title,
+								agentNum,
+								originalBaseBranch,
+							);
+
+							if (commitResult.success) {
+								finalBranchName = commitResult.branchName;
+								logDebug(
+									`Agent ${agentNum}: Committed ${commitResult.filesCommitted} files to ${finalBranchName}`,
+								);
+							} else {
+								finalFailureReason =
+									commitResult.error &&
+									typeof commitResult.error === "object" &&
+									"message" in commitResult.error
+										? (commitResult.error as { message: string }).message
+										: String(commitResult.error);
+								preserveSandbox = true;
+								logWarn(`Sandbox commit failed: ${finalFailureReason}`);
+							}
+						}
+					} catch (commitErr) {
+						finalFailureReason = commitErr instanceof Error ? commitErr.message : String(commitErr);
+						preserveSandbox = true;
+						logDebug(`Sandbox commit error for task "${task.title}": ${commitErr}`);
+					}
+				}
+
+				if (finalFailureReason) {
+					const retryable = isRetryableError(finalFailureReason);
+					if (retryable) {
+						sawRetryableFailure = true;
+						logWarn(`Task "${task.title}" encountered retryable error: ${finalFailureReason}`);
+					} else {
+						logError(`Task "${task.title}" failed: ${finalFailureReason}`);
+						logTaskProgress(task.title, "failed", workDir);
+						result.tasksFailed++;
+						notifyTaskFailed(task.title, finalFailureReason);
+						await taskSource.markComplete(task.id);
+						clearDeferredTask(taskSource.type, task, workDir, prdFile);
+					}
+				} else if (aiResult?.success) {
+					logSuccess(`Task "${task.title}" completed`);
+					result.totalInputTokens += aiResult.inputTokens;
+					result.totalOutputTokens += aiResult.outputTokens;
+
+					await taskSource.markComplete(task.id);
+					logTaskProgress(task.title, "completed", workDir);
+					result.tasksCompleted++;
+					notifyTaskComplete(task.title);
+					clearDeferredTask(taskSource.type, task, workDir, prdFile);
+
+					if (finalBranchName) {
+						completedBranches.push(finalBranchName);
+					}
+				}
+
+				// Cleanup
+				if (worktreeDir) {
+					if (agentUsedSandbox) {
+						if (finalFailureReason || preserveSandbox) {
+							logWarn(`Sandbox preserved for manual review: ${worktreeDir}`);
+						} else {
+							await cleanupSandbox(worktreeDir);
+							logDebug(`Cleaned up sandbox: ${worktreeDir}`);
+						}
+					} else {
+						worktreesToCleanup.push({ worktreeDir, branchName: finalBranchName });
+					}
+				}
+			}
+
+			// Cleanup all worktrees in parallel
+			if (worktreesToCleanup.length > 0) {
+				const cleanupResults = await Promise.all(
+					worktreesToCleanup.map(({ worktreeDir, branchName }) =>
+						cleanupAgentWorktree(worktreeDir, branchName, workDir).then((cleanup) => ({
+							worktreeDir,
+							leftInPlace: cleanup.leftInPlace,
+						})),
+					),
 				);
 
-			if (effectiveUseSandbox) {
-				return runInSandbox();
+				for (const { worktreeDir, leftInPlace } of cleanupResults) {
+					if (leftInPlace) {
+						logInfo(`Worktree left in place (uncommitted changes): ${worktreeDir}`);
+					}
+				}
 			}
 
-			return runAgentInWorktree(
-				engine,
-				task,
-				globalAgentNum,
-				baseBranch,
-				isolationBase,
-				workDir,
-				prdSource,
-				prdFile,
-				prdIsFolder,
-				maxRetries,
-				retryDelay,
-				skipTests,
-				skipLint,
-				browserEnabled,
-				modelOverride,
-				engineArgs,
-			).then((res) => {
-				if (shouldFallbackToSandbox(res.error)) {
-					logWarn(`Agent ${globalAgentNum}: Worktree unavailable, retrying in sandbox mode.`);
-					if (res.worktreeDir) {
-						cleanupAgentWorktree(res.worktreeDir, res.branchName, workDir).catch(() => {
-							// Ignore cleanup failures during fallback
-						});
-					}
-					return runInSandbox();
-				}
-				return res;
-			});
-		});
+			if (sawRetryableFailure) {
+				logWarn("Stopping early due to retryable errors. Try again later.");
+				break;
+			}
+		}
 
-		const results = await Promise.all(promises);
+		// Merge phase: merge completed branches back to base branch
+		if (!skipMerge && !dryRun && completedBranches.length > 0) {
+			// NEW: Acquire merge lock before merge phase
+			const mergeLockAcquired = acquireFileLock(MERGE_LOCK_FILE, workDir);
+			if (!mergeLockAcquired) {
+				logWarn("Could not acquire merge lock, another merge may be in progress");
+				throw new Error("Merge conflict detected");
+			}
 
-		// Process results and collect worktrees for parallel cleanup
-		let sawRetryableFailure = false;
-		const worktreesToCleanup: Array<{ worktreeDir: string; branchName: string }> = [];
-
-		for (const agentResult of results) {
-			const {
-				task,
-				agentNum,
-				worktreeDir,
-				result: aiResult,
-				error,
-				usedSandbox: agentUsedSandbox,
-			} = agentResult;
-			let branchName = agentResult.branchName;
-			let failureReason: string | undefined = error;
-			let retryableFailure = false;
-			let preserveSandbox = false;
-
-			if (!failureReason && aiResult?.success && agentUsedSandbox && worktreeDir) {
+			try {
+				const git = simpleGit(workDir);
+				let stashed = false;
 				try {
-					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
-					if (modifiedFiles.length > 0) {
-						const commitResult = await commitSandboxChanges(
-							workDir,
-							modifiedFiles,
-							worktreeDir,
-							task.title,
-							agentNum,
-							originalBaseBranch,
-						);
+					const status = await git.status();
+					const hasChanges = status.files.length > 0 || status.not_added.length > 0;
+					if (hasChanges) {
+						await git.stash(["push", "-u", "-m", "ralphy-merge-stash"]);
+						stashed = true;
+						logDebug("Stashed local changes before merge phase");
+					}
+				} catch (stashErr) {
+					logWarn(`Failed to stash local changes: ${stashErr}`);
+				}
 
-						if (commitResult.success) {
-							branchName = commitResult.branchName;
-							logDebug(
-								`Agent ${agentNum}: Committed ${commitResult.filesCommitted} files to ${branchName}`,
-							);
-						} else {
-							failureReason = commitResult.error || "Failed to commit sandbox changes";
-							preserveSandbox = true; // Preserve work for manual recovery
+				try {
+					await mergeCompletedBranches(
+						completedBranches,
+						originalBaseBranch,
+						engine,
+						workDir,
+						modelOverride,
+						engineArgs,
+					);
+
+					const currentBranch = await getCurrentBranch(workDir);
+					if (currentBranch !== startingBranch) {
+						logDebug(`Restoring starting branch: ${startingBranch}`);
+						await returnToBaseBranch(startingBranch, workDir);
+					}
+				} finally {
+					if (stashed) {
+						try {
+							await git.stash(["pop"]);
+							logDebug("Restored local changes after merge phase");
+						} catch (popErr) {
+							logWarn(`Failed to restore local changes: ${popErr}`);
 						}
 					}
-				} catch (commitErr) {
-					failureReason = commitErr instanceof Error ? commitErr.message : String(commitErr);
-					preserveSandbox = true; // Preserve work for manual recovery
 				}
-			}
-
-			if (failureReason) {
-				retryableFailure = isRetryableError(failureReason);
-				if (retryableFailure) {
-					const deferrals = recordDeferredTask(taskSource.type, task, workDir, prdFile);
-					if (deferrals >= maxRetries) {
-						logError(`Task "${task.title}" failed after ${deferrals} deferrals: ${failureReason}`);
-						logTaskProgress(task.title, "failed", workDir);
-						result.tasksFailed++;
-						notifyTaskFailed(task.title, failureReason);
-						await taskSource.markComplete(task.id);
-						clearDeferredTask(taskSource.type, task, workDir, prdFile);
-						retryableFailure = false;
-					} else {
-						logWarn(`Task "${task.title}" deferred (${deferrals}/${maxRetries}): ${failureReason}`);
-						result.tasksFailed++;
-					}
-				} else {
-					logError(`Task "${task.title}" failed: ${failureReason}`);
-					logTaskProgress(task.title, "failed", workDir);
-					result.tasksFailed++;
-					notifyTaskFailed(task.title, failureReason);
-
-					// Mark failed task as complete to remove it from the queue
-					// This prevents infinite retry loops - the task has already been retried maxRetries times
-					await taskSource.markComplete(task.id);
-					clearDeferredTask(taskSource.type, task, workDir, prdFile);
-				}
-			} else if (aiResult?.success) {
-				logSuccess(`Task "${task.title}" completed`);
-				result.totalInputTokens += aiResult.inputTokens;
-				result.totalOutputTokens += aiResult.outputTokens;
-
-				await taskSource.markComplete(task.id);
-				logTaskProgress(task.title, "completed", workDir);
-				result.tasksCompleted++;
-				notifyTaskComplete(task.title);
-				clearDeferredTask(taskSource.type, task, workDir, prdFile);
-
-				// Track successful branch for merge phase
-				if (branchName) {
-					completedBranches.push(branchName);
-				}
-			} else {
-				const errMsg = aiResult?.error || "Unknown error";
-				retryableFailure = isRetryableError(errMsg);
-				if (retryableFailure) {
-					const deferrals = recordDeferredTask(taskSource.type, task, workDir, prdFile);
-					if (deferrals >= maxRetries) {
-						logError(`Task "${task.title}" failed after ${deferrals} deferrals: ${errMsg}`);
-						logTaskProgress(task.title, "failed", workDir);
-						result.tasksFailed++;
-						notifyTaskFailed(task.title, errMsg);
-						failureReason = errMsg;
-						await taskSource.markComplete(task.id);
-						clearDeferredTask(taskSource.type, task, workDir, prdFile);
-						retryableFailure = false;
-					} else {
-						logWarn(`Task "${task.title}" deferred (${deferrals}/${maxRetries}): ${errMsg}`);
-						result.tasksFailed++;
-						failureReason = errMsg;
-					}
-				} else {
-					logError(`Task "${task.title}" failed: ${errMsg}`);
-					logTaskProgress(task.title, "failed", workDir);
-					result.tasksFailed++;
-					notifyTaskFailed(task.title, errMsg);
-					failureReason = errMsg;
-
-					// Mark failed task as complete to remove it from the queue
-					// This prevents infinite retry loops - the task has already been retried maxRetries times
-					await taskSource.markComplete(task.id);
-					clearDeferredTask(taskSource.type, task, workDir, prdFile);
-				}
-			}
-
-			// Cleanup sandbox inline or collect worktree for parallel cleanup
-			if (worktreeDir) {
-				if (agentUsedSandbox) {
-					if (failureReason || preserveSandbox) {
-						logWarn(`Sandbox preserved for manual review: ${worktreeDir}`);
-					} else {
-						// Sandbox cleanup is simpler - just delete the directory
-						await cleanupSandbox(worktreeDir);
-						logDebug(`Cleaned up sandbox: ${worktreeDir}`);
-					}
-				} else {
-					// Collect worktree for parallel cleanup below
-					worktreesToCleanup.push({ worktreeDir, branchName });
-				}
-			}
-
-			if (retryableFailure) {
-				sawRetryableFailure = true;
+			} finally {
+				releaseFileLock(MERGE_LOCK_FILE, workDir);
 			}
 		}
-
-		// Cleanup all worktrees in parallel
-		if (worktreesToCleanup.length > 0) {
-			const cleanupResults = await Promise.all(
-				worktreesToCleanup.map(({ worktreeDir, branchName }) =>
-					cleanupAgentWorktree(worktreeDir, branchName, workDir).then((cleanup) => ({
-						worktreeDir,
-						leftInPlace: cleanup.leftInPlace,
-					})),
-				),
-			);
-
-			// Log any worktrees left in place
-			for (const { worktreeDir, leftInPlace } of cleanupResults) {
-				if (leftInPlace) {
-					logInfo(`Worktree left in place (uncommitted changes): ${worktreeDir}`);
-				}
-			}
-		}
-
-		// Log batch completion time
-		const batchDuration = formatDuration(Date.now() - batchStartTime);
-		logInfo(`Batch ${iteration} completed in ${batchDuration}`);
-		// If any retryable failure occurred, stop the run to allow retry later
-		if (sawRetryableFailure) {
-			logWarn("Stopping early due to retryable errors. Try again later.");
-			break;
-		}
-	}
-
-	// Merge phase: merge completed branches back to base branch
-	if (!skipMerge && !dryRun && completedBranches.length > 0) {
-		const git = simpleGit(workDir);
-		let stashed = false;
-		try {
-			const status = await git.status();
-			const hasChanges = status.files.length > 0 || status.not_added.length > 0;
-			if (hasChanges) {
-				await git.stash(["push", "-u", "-m", "ralphy-merge-stash"]);
-				stashed = true;
-				logDebug("Stashed local changes before merge phase");
-			}
-		} catch (stashErr) {
-			logWarn(`Failed to stash local changes: ${stashErr}`);
-		}
-
-		try {
-			await mergeCompletedBranches(
-				completedBranches,
-				originalBaseBranch,
-				engine,
-				workDir,
-				modelOverride,
-				engineArgs,
-			);
-
-			// Restore starting branch if we're not already on it
-			const currentBranch = await getCurrentBranch(workDir);
-			if (currentBranch !== startingBranch) {
-				logDebug(`Restoring starting branch: ${startingBranch}`);
-				await returnToBaseBranch(startingBranch, workDir);
-			}
-		} finally {
-			if (stashed) {
-				try {
-					await git.stash(["pop"]);
-					logDebug("Restored stashed changes after merge phase");
-				} catch (stashErr) {
-					logWarn(`Failed to restore stashed changes: ${stashErr}`);
-				}
-			}
-		}
+	} finally {
+		// Stop static display
+		staticAgentDisplay.stopDisplay();
 	}
 
 	return result;
@@ -666,12 +484,6 @@ export async function runParallel(
 
 /**
  * Merge completed branches back to the base branch.
- *
- * Optimized merge phase:
- * 1. Parallel pre-merge analysis (git diff doesn't require locks)
- * 2. Sort branches by conflict likelihood (merge clean ones first)
- * 3. Sequential merges (git locking requirement)
- * 4. Parallel branch deletion
  */
 async function mergeCompletedBranches(
 	branches: string[],
@@ -685,18 +497,13 @@ async function mergeCompletedBranches(
 		return;
 	}
 
-	const mergeStartTime = Date.now();
 	logInfo(`\nMerge phase: merging ${branches.length} branch(es) into ${targetBranch}`);
 
-	// Stage 1: Parallel pre-merge analysis
-	// Run git diff for all branches in parallel (doesn't require locks)
 	logDebug("Analyzing branches for potential conflicts...");
 	const analyses = await Promise.all(
 		branches.map((branch) => analyzePreMerge(branch, targetBranch, workDir)),
 	);
 
-	// Stage 2: Sort by conflict likelihood (merge clean ones first)
-	// This reduces the chance of early conflicts blocking later clean merges
 	const sortedAnalyses = sortByConflictLikelihood(analyses);
 	const sortedBranches = sortedAnalyses.map((a) => a.branch);
 
@@ -704,7 +511,6 @@ async function mergeCompletedBranches(
 		logDebug("Reordered branches to minimize conflicts");
 	}
 
-	// Stage 3: Sequential merges (git operations require this)
 	const merged: string[] = [];
 	const failed: string[] = [];
 
@@ -719,7 +525,6 @@ async function mergeCompletedBranches(
 			logSuccess(`Merged ${branch}`);
 			merged.push(branch);
 		} else if (mergeResult.hasConflicts && mergeResult.conflictedFiles) {
-			// Try AI-assisted conflict resolution
 			logWarn(`Merge conflict in ${branch}, attempting AI resolution...`);
 
 			const resolved = await resolveConflictsWithAI(
@@ -745,8 +550,6 @@ async function mergeCompletedBranches(
 		}
 	}
 
-	// Stage 4: Parallel branch deletion
-	// Delete all successfully merged branches in parallel
 	if (merged.length > 0) {
 		const deleteResults = await Promise.all(
 			merged.map(async (branch) => {
@@ -762,10 +565,8 @@ async function mergeCompletedBranches(
 		}
 	}
 
-	// Summary
-	const mergeDuration = formatDuration(Date.now() - mergeStartTime);
 	if (merged.length > 0) {
-		logSuccess(`Successfully merged ${merged.length} branch(es) in ${mergeDuration}`);
+		logSuccess(`Successfully merged ${merged.length} branch(es)`);
 	}
 	if (failed.length > 0) {
 		logWarn(`Failed to merge ${failed.length} branch(es): ${failed.join(", ")}`);

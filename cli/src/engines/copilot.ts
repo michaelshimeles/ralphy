@@ -21,7 +21,12 @@ export class CopilotEngine extends BaseAIEngine {
 	 * Build command arguments for Copilot CLI
 	 * Returns args array and optional stdin content for Windows
 	 */
-	private buildArgs(
+	protected buildArgs(prompt: string, _workDir: string, options?: EngineOptions): string[] {
+		const { args } = this.buildArgsInternal(prompt, options);
+		return args;
+	}
+
+	private buildArgsInternal(
 		prompt: string,
 		options?: EngineOptions,
 	): { args: string[]; stdinContent?: string } {
@@ -47,7 +52,7 @@ export class CopilotEngine extends BaseAIEngine {
 	}
 
 	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
-		const { args, stdinContent } = this.buildArgs(prompt, options);
+		const { args, stdinContent } = this.buildArgsInternal(prompt, options);
 
 		const startTime = Date.now();
 		const { stdout, stderr, exitCode } = await execCommand(
@@ -124,7 +129,7 @@ export class CopilotEngine extends BaseAIEngine {
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
 	): Promise<AIResult> {
-		const { args, stdinContent } = this.buildArgs(prompt, options);
+		const { args, stdinContent } = this.buildArgsInternal(prompt, options);
 
 		const outputLines: string[] = [];
 		const startTime = Date.now();
@@ -182,5 +187,29 @@ export class CopilotEngine extends BaseAIEngine {
 			outputTokens: 0,
 			cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
 		};
+	}
+
+	protected processCliResult(
+		stdout: string,
+		stderr: string,
+		exitCode: number,
+		_workDir: string,
+	): AIResult {
+		const output = stdout + stderr;
+		const response = this.parseOutput(output);
+		const error = checkForErrors(output);
+		if (error) {
+			return { success: false, response, inputTokens: 0, outputTokens: 0, error };
+		}
+		if (exitCode !== 0) {
+			return {
+				success: false,
+				response,
+				inputTokens: 0,
+				outputTokens: 0,
+				error: formatCommandError(exitCode, output),
+			};
+		}
+		return { success: true, response, inputTokens: 0, outputTokens: 0 };
 	}
 }

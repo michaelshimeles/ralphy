@@ -1,19 +1,22 @@
-export * from "./types.ts";
+export * from "./cached-task-source.ts";
+export * from "./converter.ts";
+export * from "./csv.ts";
+export * from "./github.ts";
 export * from "./markdown.ts";
 export * from "./markdown-folder.ts";
+export * from "./types.ts";
 export * from "./yaml.ts";
-export * from "./github.ts";
-export * from "./cached-task-source.ts";
 
+import { CsvTaskSource } from "./csv.ts";
 import { GitHubTaskSource } from "./github.ts";
-import { MarkdownFolderTaskSource } from "./markdown-folder.ts";
 import { MarkdownTaskSource } from "./markdown.ts";
+import { MarkdownFolderTaskSource } from "./markdown-folder.ts";
 import type { TaskSource, TaskSourceType } from "./types.ts";
 import { YamlTaskSource } from "./yaml.ts";
 
 interface TaskSourceOptions {
 	type: TaskSourceType;
-	/** File path for markdown/yaml sources */
+	/** File path for markdown/yaml/csv sources */
 	filePath?: string;
 	/** Repo path (owner/repo) for GitHub source */
 	repo?: string;
@@ -43,6 +46,12 @@ export function createTaskSource(options: TaskSourceOptions): TaskSource {
 				throw new Error("filePath is required for yaml task source");
 			}
 			return new YamlTaskSource(options.filePath);
+
+		case "csv":
+			if (!options.filePath) {
+				throw new Error("filePath is required for csv task source");
+			}
+			return new CsvTaskSource(options.filePath);
 
 		case "github":
 			if (!options.repo) {

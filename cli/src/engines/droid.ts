@@ -182,4 +182,17 @@ export class DroidEngine extends BaseAIEngine {
 			cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
 		};
 	}
+
+	protected buildArgs(_prompt: string, _workDir: string, _options?: EngineOptions): string[] {
+		return [];
+	}
+
+	protected processCliResult(
+		_stdout: string,
+		_stderr: string,
+		_exitCode: number,
+		_workDir: string,
+	): AIResult {
+		return { success: true, response: "Not implemented", inputTokens: 0, outputTokens: 0 };
+	}
 }

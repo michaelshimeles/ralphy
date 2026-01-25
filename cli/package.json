@@ -7,10 +7,20 @@
 	"bin": {
 		"ralphy": "./bin.js"
 	},
-	"files": ["dist", "bin.js", "README.md"],
+	"files": [
+		"dist",
+		"bin.js",
+		"README.md"
+	],
 	"scripts": {
 		"dev": "bun run src/index.ts",
-		"build": "bun build src/index.ts --compile --minify --target=bun-darwin-arm64 --outfile dist/ralphy-darwin-arm64",
+		"test": "bun test",
+		"test:watch": "bun test --watch",
+		"typecheck": "bunx tsc --noEmit",
+		"lint": "biome check src/**/*.ts",
+		"lint:fix": "biome check --write src/**/*.ts",
+		"format": "biome format --write src/**/*.ts",
+		"build": "bun run build:darwin-x64",
 		"build:darwin-arm64": "bun build src/index.ts --compile --minify --target=bun-darwin-arm64 --outfile dist/ralphy-darwin-arm64",
 		"build:darwin-x64": "bun build src/index.ts --compile --minify --target=bun-darwin-x64 --outfile dist/ralphy-darwin-x64",
 		"build:linux-x64": "bun build src/index.ts --compile --minify --target=bun-linux-x64 --outfile dist/ralphy-linux-x64",
@@ -40,17 +50,17 @@
 		"url": "https://github.com/michaelshimeles/ralphy"
 	},
 	"dependencies": {
-		"commander": "^13.0.0",
-		"yaml": "^2.7.0",
-		"simple-git": "^3.27.0",
 		"@octokit/rest": "^21.0.0",
-		"picocolors": "^1.1.0",
+		"commander": "^13.0.0",
 		"nanospinner": "^1.2.0",
 		"node-notifier": "^10.0.1",
+		"picocolors": "^1.1.0",
+		"simple-git": "^3.27.0",
+		"yaml": "^2.7.0",
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^1.9.0",
+		"@biomejs/biome": "^2.3.12",
 		"@types/bun": "^1.1.0",
 		"@types/node-notifier": "^8.0.5"
 	},

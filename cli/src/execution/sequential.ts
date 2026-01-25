@@ -2,13 +2,13 @@ import { logTaskProgress } from "../config/writer.ts";
 import type { AIEngine, AIResult } from "../engines/types.ts";
 import { createTaskBranch, returnToBaseBranch } from "../git/branch.ts";
 import { createPullRequest } from "../git/pr.ts";
-import type { Task, TaskSource } from "../tasks/types.ts";
+import type { TaskSource } from "../tasks/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
 import { ProgressSpinner } from "../ui/spinner.ts";
 import { clearDeferredTask, recordDeferredTask } from "./deferred.ts";
 import { buildPrompt } from "./prompt.ts";
-import { isRetryableError, sleep, withRetry } from "./retry.ts";
+import { isRetryableError, withRetry } from "./retry.ts";
 
 export interface ExecutionOptions {
 	engine: AIEngine;
@@ -33,10 +33,25 @@ export interface ExecutionOptions {
 	modelOverride?: string;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
+	/** Additional environment variables for the engine CLI */
+	env?: Record<string, string>;
 	/** Use lightweight sandboxes instead of git worktrees for parallel execution */
 	useSandbox?: boolean;
 	/** Additional arguments to pass to the engine CLI */
+	/** Additional arguments to pass to the engine CLI */
 	engineArgs?: string[];
+	/** Separate model for planning phase (cheaper/faster) */
+	planningModel?: string;
+	/** Force non-git parallel execution (sandboxes) even in git repos */
+	noGitParallel?: boolean;
+	/** Log AI thoughts/reasoning to console */
+	logThoughts?: boolean;
+	/** Enable full debug logging (cli errors, full ai responses) */
+	debug?: boolean;
+	/** Enable comprehensive OpenCode debugging */
+	debugOpenCode?: boolean;
+	/** Progress callback for progress reporting */
+	onProgress?: (step: string) => void;
 }
 
 export interface ExecutionResult {
@@ -125,7 +140,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		const spinner = new ProgressSpinner(task.title, activeSettings);
 		let aiResult: AIResult | null = null;
 
-		if (dryRun) {
+		if (dryRun && !options.debugOpenCode) {
 			spinner.success("(dry run) Skipped");
 		} else {
 			try {
@@ -137,7 +152,11 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						const engineOptions = {
 							...(modelOverride && { modelOverride }),
 							...(engineArgs && engineArgs.length > 0 && { engineArgs }),
+							...(options.debugOpenCode && { debugOpenCode: options.debugOpenCode }),
+							...(options.logThoughts !== undefined && { logThoughts: options.logThoughts }),
+							...(dryRun && { dryRun: true }),
 						};
+
 						if (engine.executeStreaming) {
 							return await engine.executeStreaming(
 								prompt,
@@ -166,8 +185,13 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 					},
 				);
 
+				if (options.debug) {
+					logDebug("Full AI Response:", aiResult.response);
+					if (aiResult.error) logDebug("Full AI Error:", aiResult.error);
+				}
+
 				if (aiResult.success) {
-					spinner.success(undefined, true); // Show timing breakdown
+					spinner.success();
 					result.totalInputTokens += aiResult.inputTokens;
 					result.totalOutputTokens += aiResult.outputTokens;
 

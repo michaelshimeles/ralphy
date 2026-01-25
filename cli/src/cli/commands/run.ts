@@ -1,10 +1,12 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { dirname, isAbsolute } from "node:path";
 import { loadConfig } from "../../config/loader.ts";
 import type { RuntimeOptions } from "../../config/types.ts";
 import { createEngine, isEngineAvailable } from "../../engines/index.ts";
 import type { AIEngineName } from "../../engines/types.ts";
 import { isBrowserAvailable } from "../../execution/browser.ts";
 import { runParallel } from "../../execution/parallel.ts";
+import { runParallelNoGit } from "../../execution/parallel-no-git.ts";
 import { type ExecutionResult, runSequential } from "../../execution/sequential.ts";
 import { getDefaultBaseBranch } from "../../git/branch.ts";
 import { sendNotifications } from "../../notifications/webhook.ts";
@@ -12,43 +14,61 @@ import { CachedTaskSource, createTaskSource } from "../../tasks/index.ts";
 import {
 	formatDuration,
 	formatTokens,
-	logError,
 	logInfo,
 	logSuccess,
+	setDebug,
 	setVerbose,
 } from "../../ui/logger.ts";
 import { notifyAllComplete } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
+import { registerCleanup } from "../../utils/cleanup.ts";
 
 /**
  * Run the PRD loop (multiple tasks from file/GitHub)
  */
 export async function runLoop(options: RuntimeOptions): Promise<void> {
-	const workDir = process.cwd();
+	// Infer workDir from PRD file path if specified
+	let workDir = process.cwd();
+
+	// Check if prdFile is an absolute path and infer workDir from it
+	if (options.prdFile && isAbsolute(options.prdFile)) {
+		workDir = dirname(options.prdFile);
+		// Check if workDir exists, if not fall back to cwd
+		try {
+			statSync(workDir);
+		} catch (_error) {
+			workDir = process.cwd();
+		}
+	}
+
 	const startTime = Date.now();
 	const config = loadConfig(workDir);
 
 	// Set verbose mode
 	setVerbose(options.verbose);
+	if (options.debug) {
+		setDebug(true);
+		// Also set environment variable for base.ts debug logging
+		process.env.RALPHY_DEBUG = "true";
+	}
 
 	// Validate PRD source
 	if (options.prdSource === "markdown" || options.prdSource === "yaml") {
 		if (!existsSync(options.prdFile)) {
-			logError(`${options.prdFile} not found in current directory`);
-			logInfo(`Create a ${options.prdFile} file with tasks`);
-			process.exit(1);
+			throw new Error(
+				`${options.prdFile} not found in current directory. Create a ${options.prdFile} file with tasks.`,
+			);
 		}
 	} else if (options.prdSource === "markdown-folder") {
 		if (!existsSync(options.prdFile)) {
-			logError(`PRD folder ${options.prdFile} not found`);
-			logInfo(`Create a ${options.prdFile}/ folder with markdown files containing tasks`);
-			process.exit(1);
+			throw new Error(
+				`PRD folder ${options.prdFile} not found. Create a ${options.prdFile}/ folder with markdown files containing tasks.`,
+			);
 		}
 	}
 
 	if (options.prdSource === "github" && !options.githubRepo) {
-		logError("GitHub repository not specified. Use --github owner/repo");
-		process.exit(1);
+		throw new Error("GitHub repository not specified. Use --github owner/repo");
 	}
 
 	// Check engine availability
@@ -56,8 +76,9 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	const available = await isEngineAvailable(options.aiEngine as AIEngineName);
 
 	if (!available) {
-		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
+		throw new Error(
+			`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`,
+		);
 	}
 
 	// Create task source with caching for better performance
@@ -69,6 +90,12 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		label: options.githubLabel,
 	});
 	const taskSource = new CachedTaskSource(innerTaskSource);
+
+	// Register for cleanup
+	registerCleanup(async () => {
+		await taskSource.flush();
+		taskSource.dispose();
+	});
 
 	// Check if there are tasks
 	const remaining = await taskSource.countRemaining();
@@ -84,10 +111,9 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 
 		// Check if base branch is empty (unborn branch - no commits yet)
 		if (!baseBranch) {
-			logError("Cannot run in parallel/branch mode: repository has no commits yet.");
-			logInfo("Please make an initial commit first:");
-			logInfo('  git add . && git commit -m "Initial commit"');
-			process.exit(1);
+			throw new Error(
+				"Cannot run in parallel/branch mode: repository has no commits yet. Please make an initial commit first.",
+			);
 		}
 	}
 
@@ -101,7 +127,12 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	if (isBrowserAvailable(options.browserEnabled)) {
 		logInfo("Browser automation enabled (agent-browser)");
 	}
-	console.log("");
+	logInfo("");
+
+	// Note: planning model configuration checked implicitly during planning phase
+	if (options.planningModel) {
+		logInfo(`Planning model configured: ${options.planningModel}`);
+	}
 
 	// Build active settings for display
 	const activeSettings = buildActiveSettings(options);
@@ -109,32 +140,66 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	// Run tasks
 	let result: ExecutionResult;
 	if (options.parallel) {
-		result = await runParallel({
-			engine,
-			taskSource,
-			workDir,
-			skipTests: options.skipTests,
-			skipLint: options.skipLint,
-			dryRun: options.dryRun,
-			maxIterations: options.maxIterations,
-			maxRetries: options.maxRetries,
-			retryDelay: options.retryDelay,
-			branchPerTask: options.branchPerTask,
-			baseBranch,
-			createPr: options.createPr,
-			draftPr: options.draftPr,
-			autoCommit: options.autoCommit,
-			browserEnabled: options.browserEnabled,
-			maxParallel: options.maxParallel,
-			prdSource: options.prdSource,
-			prdFile: options.prdFile,
-			prdIsFolder: options.prdIsFolder,
-			activeSettings,
-			useSandbox: options.useSandbox,
-			modelOverride: options.modelOverride,
-			skipMerge: options.skipMerge,
-			engineArgs: options.engineArgs,
-		});
+		if (options.noGitParallel) {
+			result = await runParallelNoGit({
+				engine,
+				taskSource,
+				workDir,
+				skipTests: options.skipTests,
+				skipLint: options.skipLint,
+				dryRun: options.dryRun,
+				maxIterations: options.maxIterations,
+				maxRetries: options.maxRetries,
+				retryDelay: options.retryDelay,
+				branchPerTask: options.branchPerTask,
+				baseBranch,
+				createPr: options.createPr,
+				draftPr: options.draftPr,
+				autoCommit: options.autoCommit,
+				browserEnabled: options.browserEnabled,
+				maxParallel: options.maxParallel,
+				prdSource: options.prdSource,
+				prdFile: options.prdFile,
+				prdIsFolder: options.prdIsFolder,
+				activeSettings,
+				modelOverride: options.modelOverride,
+				debug: options.debug,
+				debugOpenCode: options.debugOpenCode,
+				planningModel: options.planningModel,
+			});
+		} else {
+			result = await runParallel({
+				engine,
+				taskSource,
+				workDir,
+				skipTests: options.skipTests,
+				skipLint: options.skipLint,
+				dryRun: options.dryRun,
+				maxIterations: options.maxIterations,
+				maxRetries: options.maxRetries,
+				retryDelay: options.retryDelay,
+				branchPerTask: options.branchPerTask,
+				baseBranch,
+				createPr: options.createPr,
+				draftPr: options.draftPr,
+				autoCommit: options.autoCommit,
+				browserEnabled: options.browserEnabled,
+				maxParallel: options.maxParallel,
+				prdSource: options.prdSource,
+				prdFile: options.prdFile,
+				prdIsFolder: options.prdIsFolder,
+				activeSettings,
+				useSandbox: options.useSandbox,
+				modelOverride: options.modelOverride,
+				skipMerge: options.skipMerge,
+				engineArgs: options.engineArgs,
+				noGitParallel: options.noGitParallel,
+				planningModel: options.planningModel,
+				logThoughts: options.logThoughts,
+				debug: options.debug,
+				debugOpenCode: options.debugOpenCode,
+			});
+		}
 	} else {
 		result = await runSequential({
 			engine,
@@ -157,6 +222,10 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
+			planningModel: options.planningModel,
+			logThoughts: options.logThoughts,
+			debug: options.debug,
+			debugOpenCode: options.debugOpenCode,
 		});
 	}
 
@@ -166,16 +235,16 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 
 	// Summary
 	const duration = Date.now() - startTime;
-	console.log("");
-	console.log("=".repeat(50));
+	logInfo("");
+	logInfo("=".repeat(50));
 	logInfo("Summary:");
-	console.log(`  Completed: ${result.tasksCompleted}`);
-	console.log(`  Failed:    ${result.tasksFailed}`);
-	console.log(`  Duration:  ${formatDuration(duration)}`);
+	logInfo(`  Completed: ${result.tasksCompleted}`);
+	logInfo(`  Failed:    ${result.tasksFailed}`);
+	logInfo(`  Duration:  ${formatDuration(duration)}`);
 	if (result.totalInputTokens > 0 || result.totalOutputTokens > 0) {
-		console.log(`  Tokens:    ${formatTokens(result.totalInputTokens, result.totalOutputTokens)}`);
+		logInfo(`  Tokens:    ${formatTokens(result.totalInputTokens, result.totalOutputTokens)}`);
 	}
-	console.log("=".repeat(50));
+	logInfo("=".repeat(50));
 
 	// Send webhook notifications
 	const status = result.tasksFailed > 0 ? "failed" : "completed";

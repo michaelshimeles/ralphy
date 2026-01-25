@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadBoundaries, loadProjectContext, loadRules } from "../config/loader.ts";
+import type { Task } from "../tasks/types.ts";
 import { getBrowserInstructions, isBrowserAvailable } from "./browser.ts";
+import { getSkillsAsCsv } from "./skill-compress.ts";
 
 interface PromptOptions {
 	task: string;
@@ -14,7 +16,7 @@ interface PromptOptions {
 }
 
 /**
- * Detect skill/playbook directories that can guide the agent.
+ * Detect skill/playbook directories that can guide to agent.
  * We keep this engine-agnostic: OpenCode can load skills via `skill` tool,
  * other engines can still read these docs as repo guidance.
  */
@@ -29,7 +31,7 @@ function detectAgentSkills(workDir: string): string[] {
 }
 
 /**
- * Build the full prompt with project context, rules, boundaries, and task
+ * Build full prompt with project context, rules, boundaries, and task
  */
 export function buildPrompt(options: PromptOptions): string {
 	const {
@@ -63,20 +65,36 @@ export function buildPrompt(options: PromptOptions): string {
 	}
 
 	// Agent skills/playbooks (optional)
-	const skillRoots = detectAgentSkills(workDir);
-	if (skillRoots.length > 0) {
+	const skillsCsv = getSkillsAsCsv(workDir);
+	if (skillsCsv) {
 		parts.push(
 			[
 				"## Agent Skills",
-				"This repo includes skill/playbook docs that describe preferred patterns, workflows, or tooling:",
-				...skillRoots.map((p) => `- ${p}`),
+				"This repo includes compressed skill/playbook documentation for token efficiency:",
+				skillsCsv,
 				"",
 				"Before you start coding:",
-				"- Read and follow any relevant skill docs from the paths above.",
-				"- If your engine supports a `skill` tool (e.g. OpenCode), use it to load the relevant skills before implementing.",
+				"- Read and follow any relevant skill docs from the compressed list above.",
+				"- If your engine supports a `skill` tool (e.g. OpenCode), use it to load relevant skills before implementing.",
 				"- If none apply, continue normally.",
 			].join("\n"),
 		);
+	} else {
+		const skillRoots = detectAgentSkills(workDir);
+		if (skillRoots.length > 0) {
+			parts.push(
+				[
+					"## Agent Skills",
+					"This repo includes skill/playbook docs that describe preferred patterns, workflows, or tooling:",
+					...skillRoots.map((p) => `- ${p}`),
+					"",
+					"Before you start coding:",
+					"- Read and follow any relevant skill docs from the paths above.",
+					"- If your engine supports a `skill` tool (e.g. OpenCode), use it to load relevant skills before implementing.",
+					"- If none apply, continue normally.",
+				].join("\n"),
+			);
+		}
 	}
 
 	// Add browser instructions if available
@@ -84,7 +102,7 @@ export function buildPrompt(options: PromptOptions): string {
 		parts.push(getBrowserInstructions());
 	}
 
-	// Add the task
+	// Add task
 	parts.push(`## Task\n${task}`);
 
 	// Add instructions
@@ -103,26 +121,72 @@ export function buildPrompt(options: PromptOptions): string {
 		step++;
 	}
 
-	instructions.push(`${step}. Ensure the code works correctly`);
+	instructions.push(`${step}. Update progress.txt with what you did`);
 	step++;
-
 	if (autoCommit) {
 		instructions.push(`${step}. Commit your changes with a descriptive message`);
+	} else {
+		instructions.push(`${step}. Do NOT run git commit; changes will be collected automatically`);
 	}
 
-	parts.push(`## Instructions\n${instructions.join("\n")}`);
+	return `You are working on a specific task. Focus ONLY on this task:
 
-	// Add final note
-	const prdNote = prdFile ? `Do NOT modify ${prdFile}.` : "Do NOT modify the PRD file.";
-	parts.push(
-		[
-			prdNote,
-			"Do NOT modify .ralphy/progress.txt, .ralphy-worktrees, or .ralphy-sandboxes.",
-			"Keep changes focused and minimal. Do not refactor unrelated code.",
-		].join(" "),
-	);
+TASK: ${task}
 
-	return parts.join("\n\n");
+## Instructions
+${instructions.join("\n")}
+
+${prdFile ? `Do NOT modify ${prdFile}.` : "Do NOT modify the PRD file."}
+Do NOT modify .ralphy/progress.txt, .ralphy-worktrees, or .ralphy-sandboxes.
+Do NOT mark tasks complete - that will be handled separately.
+Focus only on implementing: ${task}`;
+}
+
+export function buildPlanningPrompt(
+	task: Task,
+	_autoCommit?: boolean,
+	fullTasksContext?: string,
+): string {
+	const prompt = `You are a senior engineering planner. Your job is to create a comprehensive plan for this task.
+
+TASK: ${task.title || task.id}
+${task.description ? `DESCRIPTION: ${task.description}` : ""}
+${task.dependencies && task.dependencies.length > 0 ? `DEPENDENCIES: ${task.dependencies.join(", ")}` : ""}
+
+${fullTasksContext ? `FULL PROJECT TASKS CONTEXT:\n${fullTasksContext}\n\n` : ""}
+
+First, analyze this task thoroughly and provide structured output in this format:
+
+<ANALYSIS>
+- Problem: [What is the actual problem being solved?]
+- Goal: [What is the desired end state?]
+- Complexity: [low/medium/high]
+- Risks: [Potential challenges or edge cases]
+</ANALYSIS>
+
+<PLAN>
+1. [Step 1: What to do first]
+2. [Step 2: Analysis or research needed]
+3. [Step 3: Implementation approach]
+4. [Step 4: Testing/validation]
+5. [Step 5: Final integration or cleanup]
+</PLAN>
+
+<FILES>
+path/to/file1.ext
+path/to/file2.ext
+...
+</FILES>
+
+<OPTIMIZATION>
+- Most efficient approach: [How to implement this optimally]
+- Key considerations: [Technical factors to remember]
+- Potential shortcuts: [Ways to accomplish this faster/better]
+</OPTIMIZATION>
+
+Think step by step, explaining your reasoning clearly. Use tools to explore the codebase before finalizing your plan.`;
+
+	return prompt;
 }
 
 interface ParallelPromptOptions {
@@ -133,12 +197,14 @@ interface ParallelPromptOptions {
 	skipLint?: boolean;
 	browserEnabled?: "auto" | "true" | "false";
 	allowCommit?: boolean;
+	planningAnalysis?: string;
+	planningSteps?: string[];
 }
 
 /**
  * Build a prompt for parallel agent execution
  */
-export function buildParallelPrompt(options: ParallelPromptOptions): string {
+export function buildExecutionPrompt(options: ParallelPromptOptions): string {
 	const {
 		task,
 		progressFile,
@@ -147,23 +213,43 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 		skipLint = false,
 		browserEnabled = "auto",
 		allowCommit = true,
+		planningAnalysis,
+		planningSteps,
 	} = options;
 
-	// Parallel execution typically runs in a worktree; we still try to detect skills from CWD.
-	// If callers pass a workDir in the future, prefer that instead.
-	const skillRoots = detectAgentSkills(process.cwd());
-	const skillsSection =
-		skillRoots.length > 0
-			? `\n\nAgent Skills:\nThis repo includes skill/playbook docs:\n${skillRoots
-					.map((p) => `- ${p}`)
-					.join(
-						"\n",
-					)}\nBefore coding, read relevant skills. If your engine supports a \`skill\` tool, load them before implementing.`
+	// Add planning context if available
+	const planningSection =
+		planningAnalysis && planningSteps
+			? `
+## Planning Analysis (Completed Earlier)
+${planningAnalysis}
+
+## Planned Implementation Steps
+${planningSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Follow these steps. If they don't apply to the current situation, explain why and propose an alternative approach.
+`
 			: "";
 
 	const browserSection = isBrowserAvailable(browserEnabled)
 		? `\n\n${getBrowserInstructions()}`
 		: "";
+
+	// Parallel execution typically runs in a worktree; we still try to detect skills from CWD.
+	// If callers pass a workDir in the future, prefer that instead.
+	const skillsCsv = getSkillsAsCsv(process.cwd());
+	const skillsSection = skillsCsv
+		? `\n\nAgent Skills (Compressed for token efficiency):\n${skillsCsv}\nBefore coding, read relevant skills. If your engine supports a \`skill\` tool, load them before implementing.`
+		: (() => {
+				const skillRoots = detectAgentSkills(process.cwd());
+				return skillRoots.length > 0
+					? `\n\nAgent Skills:\nThis repo includes skill/playbook docs:\n${skillRoots
+							.map((p) => `- ${p}`)
+							.join(
+								"\n",
+							)}\nBefore coding, read relevant skills. If your engine supports a \`skill\` tool, load them before implementing.`
+					: "";
+			})();
 
 	const instructions = ["1. Implement this specific task completely"];
 
@@ -190,13 +276,35 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 
 	return `You are working on a specific task. Focus ONLY on this task:
 
-TASK: ${task}${browserSection}${skillsSection}
+${planningSection}
+## Task
+${task}${browserSection}${skillsSection}
 
-Instructions:
+## Instructions
 ${instructions.join("\n")}
 
 ${prdFile ? `Do NOT modify ${prdFile}.` : "Do NOT modify the PRD file."}
 Do NOT modify .ralphy/progress.txt, .ralphy-worktrees, or .ralphy-sandboxes.
 Do NOT mark tasks complete - that will be handled separately.
 Focus only on implementing: ${task}`;
+}
+
+/**
+ * Build a prompt for parallel agent execution (backward compatibility)
+ */
+export function buildParallelPrompt(options: ParallelPromptOptions): string {
+	// Extract planning context if provided
+	// biome-ignore lint/suspicious/noExplicitAny: Temporary cast for flexible options
+	const { planningAnalysis, planningSteps, ...otherOptions } = options as any;
+
+	if (planningAnalysis && planningSteps) {
+		return buildExecutionPrompt({
+			...otherOptions,
+			planningAnalysis,
+			planningSteps,
+		});
+	}
+
+	// Fallback to original behavior
+	return buildExecutionPrompt(otherOptions);
 }

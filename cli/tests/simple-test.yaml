@@ -1,0 +1,7 @@
+tasks:
+  - title: Test enhanced planning with colors
+    body: >
+      Create a simple TypeScript function that validates email format and add
+      comprehensive unit tests for it. Make sure to include edge cases and error
+      handling.
+    completed: true

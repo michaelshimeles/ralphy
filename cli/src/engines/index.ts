@@ -1,12 +1,12 @@
-export * from "./types.ts";
 export * from "./base.ts";
 export * from "./claude.ts";
-export * from "./opencode.ts";
-export * from "./cursor.ts";
 export * from "./codex.ts";
-export * from "./qwen.ts";
-export * from "./droid.ts";
 export * from "./copilot.ts";
+export * from "./cursor.ts";
+export * from "./droid.ts";
+export * from "./opencode.ts";
+export * from "./qwen.ts";
+export * from "./types.ts";
 
 import { ClaudeEngine } from "./claude.ts";
 import { CodexEngine } from "./codex.ts";
@@ -52,5 +52,12 @@ export function getEngineName(name: AIEngineName): string {
  * Check if an engine is available
  */
 export async function isEngineAvailable(name: AIEngineName): Promise<boolean> {
-	return createEngine(name).isAvailable();
+	// debugLog(`[DEBUG] isEngineAvailable: Checking '${name}'`);
+	const engine = createEngine(name);
+	// debugLog(
+	// 	`[DEBUG] isEngineAvailable: Created engine '${engine.name}' with CLI '${engine.cliCommand}'`,
+	// );
+	const result = await engine.isAvailable();
+	// debugLog(`[DEBUG] isEngineAvailable: Result for '${name}' = ${result}`);
+	return result;
 }
