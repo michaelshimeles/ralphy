@@ -136,11 +136,13 @@ export class OllamaEngine extends BaseAIEngine {
 			this.cliCommand,
 			args,
 			workDir,
-			(chunk, step) => {
-				outputLines.push(chunk);
+			(line: string) => {
+				outputLines.push(line);
 				if (onProgress) {
-					const detectedStep = detectStepFromOutput(chunk);
-					onProgress(chunk, detectedStep || step);
+					const detectedStep = detectStepFromOutput(line);
+					// Avoid showing literal "null" or empty lines as the step
+					const safeLine = line && line.trim() !== "null" ? line : "Working";
+					onProgress(detectedStep || safeLine);
 				}
 			},
 			ollamaEnv,
