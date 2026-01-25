@@ -4,58 +4,117 @@ on:
   push:
     branches: [ main, master, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    
+    name: Test and Lint
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
-    
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [18.x, 20.x]
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-      with:
-        bun-version: latest
-        
-    - name: Install dependencies
-      run: bun install
-      
-    - name: Run type check
-      run: bun run typecheck
-      
-    - name: Run linting
-      run: bun run lint
-      
-    - name: Run tests
-      run: bun test
-      
-    - name: Build project
-      run: bun run build:all
-      
-    - name: Check bundle size
-      run: |
-        ls -la dist/ || echo "No dist directory found"
-        
-  security:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: ./cli
+
+      - name: Run linter
+        run: bunx biome check . --max-diagnostics 200
+        working-directory: ./cli
+
+      - name: Format check
+        run: bunx biome format --check .
+        working-directory: ./cli
+
+      - name: Run tests
+        run: bun test
+        working-directory: ./cli
+
+      - name: Build project
+        run: bun run build
+        working-directory: ./cli
+
+      - name: Security audit
+        run: bun audit
+        working-directory: ./cli
+
+  lint-landing:
+    name: Lint Landing Page
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-      with:
-        bun-version: latest
-        
-    - name: Install dependencies
-      run: bun install
-      
-    - name: Run security tests
-      run: bun test __tests__/sandbox-security.test.ts __tests__/locking-security.test.ts
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./landing
+
+      - name: Run linting
+        run: npm run lint
+        working-directory: ./landing
+
+      - name: Build landing page
+        run: npm run build
+        working-directory: ./landing
+
+  type-check:
+    name: TypeScript Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: ./cli
+
+      - name: Type check
+        run: bunx tsc --noEmit
+        working-directory: ./cli
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Biome
+        run: bun add -d @biomejs/biome@2.3.12
+        working-directory: ./cli
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: ./cli
+
+      - name: Security audit
+        run: bun audit
+        working-directory: ./cli
