@@ -338,6 +338,16 @@ export function checkForErrors(output: string): string | null {
 			lowerTrimmed.includes("invalid model") ||
 			lowerTrimmed.includes("not available")
 		) {
+			// Improve specific error messages
+			if (lowerTrimmed.includes("rate limit")) {
+				return "OpenCode Rate Limit: Too many requests. Try: Wait 30-60s";
+			}
+			if (lowerTrimmed.includes("quota")) {
+				return "OpenCode Quota Exceeded: You've reached your usage limit. Check your OpenCode plan";
+			}
+			if (lowerTrimmed.includes("connection") || lowerTrimmed.includes("timeout")) {
+				return "OpenCode Connection Error: Unable to connect to the service. Check internet connection";
+			}
 			return trimmed;
 		}
 	}
@@ -377,67 +387,6 @@ export function formatCommandError(exitCode: number, output: string): string {
 
 /**
  * Detect step from AI output
- */
-export function detectStepFromOutput(line: string, logThoughts = false): string | null {
-	// Skip non-useful lines
-	if (!line || line.startsWith("[RAW OPENCODE OUTPUT]")) {
-		return null;
-	}
-
-	// Check for tool calls in JSON
-	try {
-		const parsed = JSON.parse(line.trim());
-		if (parsed?.tool && parsed?.file_path) {
-			const filename = parsed.file_path.split("/").pop() || parsed.file_path;
-			if (parsed.tool === "read") {
-				return `Reading ${filename}`;
-			}
-			if (parsed.tool === "write" || parsed.tool === "edit") {
-				return `Implementing ${filename}`;
-			}
-		}
-	} catch {
-		// Not JSON, continue with text processing
-	}
-
-	// Check for patterns that indicate a step or action
-	const stepPatterns = [
-		// File operations
-		/^(Reading|Writing|Creating|Updating|Deleting|Modifying|Adding|cat)\s+/i,
-		/^(Created|Updated|Modified|Deleted|Added)\s+/i,
-		// Code analysis
-		/^(Analyzing|Examining|Scanning|Parsing)\s+/i,
-		/^(Found|Located|Identified)\s+/i,
-		// Test/Build operations
-		/^(Running|Executing|Testing|Building)\s+/i,
-		/^(Ran|Executed|Tested|Built)\s+/i,
-		// Code generation
-		/^(Generating|Creating|Implementing)\s+/i,
-		// Git operations
-		/^(Cloning|Committing|Pushing|Pulling)\s+/i,
-	];
-
-	for (const pattern of stepPatterns) {
-		if (pattern.test(line)) {
-			return line.trim();
-		}
-	}
-
-	// Skip thoughts if not requested
-	if (!logThoughts && (line.includes("think") || line.includes("analyze"))) {
-		return null;
-	}
-
-	// Return any non-empty, non-technical line as a step
-	if (line.length > 10 && !line.includes("step_") && !line.includes("session")) {
-		return line;
-	}
-
-	return null;
-}
-
-/**
- * Parse token counts from stream-json output (Claude/Qwen format)
  */
 export function parseStreamJsonResult(output: string): {
 	response: string;
@@ -695,4 +644,144 @@ export abstract class BaseAIEngine implements AIEngine {
 
 		return this.processCliResult(stdout, stderr, exitCode, workDir);
 	}
+}
+export function detectStepFromOutput(line: string, logThoughts = true): string | null {
+	const trimmed = line.trim();
+
+	// Skip non-useful lines
+	if (!trimmed || trimmed.startsWith("[RAW OPENCODE OUTPUT]")) {
+		return null;
+	}
+
+	// Filter out technical noise FIRST (before any processing)
+	const lowerTrimmed = trimmed.toLowerCase();
+	if (lowerTrimmed.includes("step finish")) return null;
+	if (trimmed.includes("→") && trimmed.length < 20) return null;
+	if (trimmed.startsWith('{"type":"step_finish"')) return null;
+	if (lowerTrimmed.includes("starting planning")) return null;
+	if (trimmed.startsWith("task st-")) return null;
+	if (/^".*"$/.test(trimmed)) return null; // Any text wrapped in quotes
+	if (lowerTrimmed.includes("tokens used")) return null;
+
+	// Check for tool calls in JSON
+	try {
+		const parsed = JSON.parse(trimmed);
+
+		// Handle file-based tool calls
+		if (parsed?.tool && parsed?.file_path) {
+			const filename = parsed.file_path.split("/").pop() || parsed.file_path;
+			if (parsed.tool === "read") {
+				return `Reading ${filename}`;
+			}
+			if (parsed.tool === "write" || parsed.tool === "edit" || parsed.tool === "create") {
+				return `Implementing ${filename}`;
+			}
+		}
+
+		// Handle bash tool calls
+		if (parsed?.tool === "bash" && parsed?.command) {
+			if (parsed.command.includes("test")) {
+				return "Testing";
+			}
+			return `Running: ${parsed.command}`;
+		}
+
+		// Handle other tool calls
+		if (parsed?.tool) {
+			return `${parsed.tool}: ${JSON.stringify(parsed)}`;
+		}
+	} catch {
+		// Not JSON, continue with text processing
+	}
+
+	// Skip thoughts if not requested
+	if (!logThoughts) {
+		// Filter out general AI thoughts - check for thought-starting patterns
+		if (/^(i think|i need|need|should|could|will|going|can|might|let me)/i.test(trimmed)) {
+			return null;
+		}
+		if (trimmed.includes(" think") || trimmed.includes("analyz") || trimmed.includes("consider")) {
+			return null;
+		}
+		// Filter out long thoughts when not logging thoughts
+		if (trimmed.length > 50) {
+			return null;
+		}
+	}
+
+	// Handle "Writing to" pattern specifically (before general patterns)
+	const writingToMatch = trimmed.match(/^Writing to "([^"]+)"/);
+	if (writingToMatch) {
+		return `Implementing ${writingToMatch[1]}`;
+	}
+
+	// Handle "Reading file" pattern - return full text as-is
+	const readingFileMatch = trimmed.match(/^Reading file "([^"]+)"/);
+	if (readingFileMatch) {
+		return trimmed;
+	}
+
+	// Handle cat command pattern
+	const catMatch = trimmed.match(/^cat\s+(.+)$/);
+	if (catMatch) {
+		const filename = catMatch[1].split("/").pop() || catMatch[1];
+		return `Reading ${filename}`;
+	}
+
+	// Handle "npm test" pattern
+	if (trimmed === "npm test") {
+		return "Testing";
+	}
+
+	// Handle validation/verifying/checking patterns
+	if (/^(validating|verifying|checking|validated|verified)/i.test(trimmed)) {
+		return logThoughts ? "Validating" : trimmed;
+	}
+
+	// Handle installing/installing pattern (before general building pattern)
+	if (/^(installing|install)/i.test(trimmed)) {
+		if (process.env.DEBUG) console.log(`Matched installing pattern: "${trimmed}"`);
+		if (process.env.DEBUG) console.log(`Returning: "Installing"`);
+		return "Installing";
+	}
+
+	// Handle building/compiling patterns
+	if (/^(building|compiling)/i.test(trimmed)) {
+		return logThoughts ? "Building" : trimmed;
+	}
+
+	// Truncate long thoughts when logThoughts is true
+	if (logThoughts && trimmed.length > 50) {
+		return `${trimmed.substring(0, 47)}...`;
+	}
+
+	// Check for patterns that indicate a step or action
+	const stepPatterns = [
+		// File operations (exclude "Writing" to prevent conflict with "Writing to" pattern)
+		/^(Reading|Creating|Updating|Deleting|Modifying|Adding)\s+/i,
+		/^(Created|Updated|Modified|Deleted|Added)\s+/i,
+		// Code analysis
+		/^(Analyzing|Examining|Scanning|Parsing)\s+/i,
+		/^(Found|Located|Identified)\s+/i,
+		// Test/Build operations
+		/^(Running|Executing|Testing|Building)\s+/i,
+		/^(Ran|Executed|Tested|Built)\s+/i,
+		// Code generation
+		/^(Generating|Creating|Implementing)\s+/i,
+		// Git operations
+		/^(Cloning|Committing|Pushing|Pulling)\s+/i,
+	];
+
+	for (const pattern of stepPatterns) {
+		if (pattern.test(trimmed)) {
+			return trimmed;
+		}
+	}
+
+	// Return any non-empty, non-technical line as a step
+	if (trimmed.length > 10 && !trimmed.includes("step_") && !trimmed.includes("session")) {
+		return trimmed;
+	}
+
+	return null;
 }

@@ -124,7 +124,12 @@ function getGlobalLockState(): NonNullable<RalphyGlobalState["_lockState"]> {
 	return (globalThis as RalphyGlobalState)._lockState!;
 }
 
-export function acquireFileLock(filePath: string, workDir: string, maxRetries = 5): boolean {
+export function acquireFileLock(
+	filePath: string,
+	workDir: string,
+	maxRetries = 5,
+	allowReentrant = false,
+): boolean {
 	const normalizedPath = normalizePathForLocking(filePath, workDir);
 
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -145,13 +150,13 @@ export function acquireFileLock(filePath: string, workDir: string, maxRetries = 
 		// Check in-memory lock with ownership verification
 		const existing = locks.get(normalizedPath);
 		if (existing && now - existing.timestamp < existing.timeout) {
-			// Check if we own this lock
-			if (existing.owner === lockOwner) {
+			// Check if we own this lock (re-entrant)
+			if (existing.owner === lockOwner && allowReentrant) {
 				// Refresh our own lock
 				refreshLock(normalizedPath, workDir);
 				return true;
 			}
-			return false; // Someone else owns it
+			return false; // Someone else owns it, or we own it but re-entrancy not allowed
 		}
 
 		// Atomic lock acquisition

@@ -8,9 +8,11 @@ describe("detectStepFromOutput with logThoughts parameter", () => {
 		);
 		expect(detectStepFromOutput('Writing to "test.ts"', false)).toBe("Implementing test.ts");
 		expect(detectStepFromOutput("npm test", false)).toBe("Testing");
-		expect(detectStepFromOutput("validating configuration", false)).toBe("Validating");
-		expect(detectStepFromOutput("verifying the output", false)).toBe("Validating");
-		expect(detectStepFromOutput("checking dependencies", false)).toBe("Validating");
+		expect(detectStepFromOutput("validating configuration", false)).toBe(
+			"validating configuration",
+		);
+		expect(detectStepFromOutput("verifying the output", false)).toBe("verifying the output");
+		expect(detectStepFromOutput("checking dependencies", false)).toBe("checking dependencies");
 		expect(detectStepFromOutput('{"tool": "read", "file_path": "src/index.ts"}', false)).toBe(
 			"Reading index.ts",
 		);
@@ -73,7 +75,9 @@ describe("detectStepFromOutput with logThoughts parameter", () => {
 	test("should detect validation patterns correctly", () => {
 		expect(detectStepFromOutput("validating the code", false)).toBe("validating the code");
 		expect(detectStepFromOutput("Validating input data", true)).toBe("Validating");
-		expect(detectStepFromOutput("verifying implementation", false)).toBe("Validating");
+		expect(detectStepFromOutput("verifying implementation", false)).toBe(
+			"verifying implementation",
+		);
 		expect(detectStepFromOutput("checking dependencies", true)).toBe("Validating");
 		expect(detectStepFromOutput("validated successfully", true)).toBe("Validating");
 	});

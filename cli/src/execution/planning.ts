@@ -326,7 +326,7 @@ export async function planTaskFiles(
 	logThoughts?: boolean,
 	engineArgs?: string[],
 ): Promise<PlanningResult> {
-	const taskId = task.title || task.id || "unknown";
+	const taskId = task.title && task.title !== "No title" ? task.title : task.id || "unknown";
 	const prompt = buildPlanningPrompt(task, false, fullTasksContext);
 
 	// Emit planning started

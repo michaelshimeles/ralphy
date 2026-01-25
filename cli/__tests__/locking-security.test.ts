@@ -79,7 +79,7 @@ describe("Lock Management Security and Reliability Tests", () => {
 			expect(lock1).toBe(true);
 
 			// Acquire same lock again (re-entrant)
-			const lock2 = acquireFileLock(testFile, TEST_BASE);
+			const lock2 = acquireFileLock(testFile, TEST_BASE, 5, true);
 			expect(lock2).toBe(true);
 		});
 

@@ -31,7 +31,7 @@ describe("CLI Argument Parsing", () => {
 			"--debug-opencode",
 			"--opencode",
 			"--model",
-			"opencode/big-pickle",
+			"opencode/grok-code",
 		];
 		const { options } = parseArgs(args);
 

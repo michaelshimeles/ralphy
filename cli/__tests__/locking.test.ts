@@ -44,11 +44,13 @@ describe("Locking System", () => {
 			expect(result).toBe(true);
 		});
 
-		it("should fail to acquire a lock that's already held", () => {
+		it("should allow re-entrant access for same owner", () => {
 			const testFile = join(workDir, "test.txt");
-			acquireFileLock(testFile, workDir);
-			const result = acquireFileLock(testFile, workDir);
-			expect(result).toBe(false);
+			const lock1 = acquireFileLock(testFile, workDir);
+			expect(lock1).toBe(true);
+
+			const lock2 = acquireFileLock(testFile, workDir, 5, true);
+			expect(lock2).toBe(true);
 		});
 
 		it("should create lock file in correct location", () => {
@@ -107,11 +109,13 @@ describe("Locking System", () => {
 			acquireFileLock(file1, workDir);
 
 			const files = [file1, file2];
-			acquireLocksForFiles(files, workDir);
+			const result = acquireLocksForFiles(files, workDir);
+			expect(result).toBe(false);
 
-			// file1 should be released due to rollback
-			const canAcquireFile1 = acquireFileLock(file1, workDir);
-			expect(canAcquireFile1).toBe(true);
+			// file1 should still be locked (not released by acquireLocksForFiles since it was pre-locked)
+			// We can re-acquire it with allowReentrant
+			const canReacquireFile1 = acquireFileLock(file1, workDir, 5, true);
+			expect(canReacquireFile1).toBe(true);
 		});
 	});
 

@@ -6,7 +6,13 @@ import {
 	StepFinishSchema,
 	TextSchema,
 } from "../utils/json-validation.ts";
-import { BaseAIEngine, checkForErrors, execCommand, formatCommandError } from "./base.ts";
+import {
+	BaseAIEngine,
+	detectStepFromOutput as baseDetectStepFromOutput,
+	checkForErrors,
+	execCommand,
+	formatCommandError,
+} from "./base.ts";
 import type { AIResult, EngineOptions } from "./types.ts";
 
 const isWindows = process.platform === "win32";
@@ -177,27 +183,26 @@ export class OpenCodeEngine extends BaseAIEngine {
 	}
 
 	/** Detect step from output for progress tracking */
-	detectStepFromOutput(line: string): string | null {
+	detectStepFromOutput(line: string, logThoughts = false): string | null {
 		const trimmed = line.trim();
 		const lowerLine = trimmed.toLowerCase();
 
-		// Check for tool calls in JSON
+		// Handle OpenCode JSON text events
 		try {
 			const parsed = JSON.parse(trimmed);
-			if (parsed?.tool && parsed?.file_path) {
-				const filename = parsed.file_path.split("/").pop() || parsed.file_path;
-				if (parsed.tool === "read") {
-					return `Reading ${filename}`;
+			if (parsed?.type === "text" && parsed?.part?.text) {
+				const text = parsed.part.text;
+				// Truncate long text
+				if (text.length > 150) {
+					return text.substring(0, 150);
 				}
-				if (parsed.tool === "write" || parsed.tool === "edit") {
-					return `Implementing ${filename}`;
-				}
+				return text;
 			}
 		} catch {
 			// Not JSON, continue with text processing
 		}
 
-		// Text-based step detection
+		// OpenCode-specific step detection before base implementation
 		if (lowerLine.includes("reading") || lowerLine.includes("loading")) {
 			if (lowerLine.includes("file")) return "Reading code";
 		}
@@ -209,35 +214,19 @@ export class OpenCodeEngine extends BaseAIEngine {
 			if (lowerLine.includes("test")) return "Writing tests";
 			return "Implementing";
 		}
-		if (
-			lowerLine.includes("thinking") ||
-			lowerLine.includes("analyzing") ||
-			lowerLine.includes("considering")
-		) {
-			return "Thinking";
+
+		// Use base implementation for other cases
+		const baseResult = baseDetectStepFromOutput(line, logThoughts);
+		if (baseResult !== null && baseResult !== undefined) {
+			return baseResult;
 		}
-		if (lowerLine.includes("planning")) {
-			return "Planning";
-		}
-		if (lowerLine.includes("testing") || lowerLine.includes("running tests")) {
-			return "Testing";
-		}
+
+		// OpenCode-specific step detection
 		if (lowerLine.includes("lint") || lowerLine.includes("formatting")) {
 			return "Linting";
 		}
 		if (lowerLine.includes("commit")) return "Committing";
 		if (lowerLine.includes("staging")) return "Staging";
-
-		// Filter out technical noise
-		if (lowerLine.includes("step finish") && lowerLine.includes("tokens")) return null;
-		if (lowerLine.includes("→") && lowerLine.length < 20) return null;
-		if (lowerLine.startsWith('{"type":"step_finish"')) return null;
-		if (lowerLine.includes("starting planning")) return null;
-
-		// Return meaningful text if long enough
-		if (lowerLine.length > 10 && !lowerLine.includes("error") && !lowerLine.includes("failed")) {
-			return trimmed.length > 50 ? `${trimmed.substring(0, 47)}...` : trimmed;
-		}
 
 		return null;
 	}

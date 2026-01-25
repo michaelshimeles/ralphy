@@ -256,7 +256,7 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 	createdDirs.push(sandboxDir);
 
 	try {
-		// Get all items in the original directory
+		// Get all items in original directory
 		const items = readdirSync(originalDir);
 
 		// Track which items we've handled
@@ -268,37 +268,40 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 				const originalPath = join(originalDir, item);
 				const sandboxPath = join(sandboxDir, item);
 
-				if (existsSync(originalPath)) {
-					try {
-						// Create symlink (use 'junction' on Windows for directories)
-						const stat = lstatSync(originalPath);
-						const type = stat.isDirectory() ? "junction" : "file";
-						symlinkSync(originalPath, sandboxPath, type);
+				if (!existsSync(originalPath)) {
+					logDebug(`Agent ${agentNum}: Skipping non-existent symlink target: ${item}`);
+					continue;
+				}
 
-						// NEW: Verify symlink was created successfully
-						if (!existsSync(sandboxPath)) {
-							throw new Error(`Symlink creation failed: ${item}`);
-						}
+				// Check if it's a directory (for proper symlink creation)
+				try {
+					const stat = lstatSync(originalPath);
+					const type = stat.isDirectory() ? "junction" : "file";
+					symlinkSync(originalPath, sandboxPath, type);
 
-						const createdStat = lstatSync(sandboxPath);
-						if (!createdStat.isSymbolicLink()) {
-							throw new Error(`Created path is not a symlink: ${item}`);
-						}
-
-						// Verify symlink target exists
-						const linkTarget = readlinkSync(sandboxPath);
-						const resolvedTarget = resolve(dirname(sandboxPath), linkTarget);
-						if (!existsSync(resolvedTarget)) {
-							throw new Error(`Symlink ${item} has broken target: ${linkTarget}`);
-						}
-
-						symlinksCreated++;
-						handled.add(item);
-						createdSymlinks.push(sandboxPath);
-						logDebug(`Agent ${agentNum}: Symlinked ${item}`);
-					} catch (err) {
-						logDebug(`Agent ${agentNum}: Symlink failed for ${item} (${err}), will copy`);
+					// NEW: Verify symlink was created successfully
+					if (!existsSync(sandboxPath)) {
+						throw new Error(`Symlink creation failed: ${item}`);
 					}
+
+					const createdStat = lstatSync(sandboxPath);
+					if (!createdStat.isSymbolicLink()) {
+						throw new Error(`Created path is not a symlink: ${item}`);
+					}
+
+					// Verify symlink target exists
+					const linkTarget = readlinkSync(sandboxPath);
+					const resolvedTarget = resolve(dirname(sandboxPath), linkTarget);
+					if (!existsSync(resolvedTarget)) {
+						throw new Error(`Symlink ${item} has broken target: ${linkTarget}`);
+					}
+
+					symlinksCreated++;
+					handled.add(item);
+					createdSymlinks.push(sandboxPath);
+					logDebug(`Agent ${agentNum}: Symlinked ${item}`);
+				} catch (err) {
+					logDebug(`Agent ${agentNum}: Symlink failed for ${item} (${err}), will copy`);
 				}
 			}
 		}
