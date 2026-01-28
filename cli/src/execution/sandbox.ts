@@ -15,6 +15,25 @@ import { dirname, join, sep } from "node:path";
 import { logDebug } from "../ui/logger.ts";
 
 /**
+ * Simple glob matcher to avoid adding heavy dependencies.
+ * Supports: "*.log" (wildcard at start/end), "node_modules" (exact match), "dir/**" (prefix match)
+ */
+function matchesPattern(filename: string, pattern: string): boolean {
+	if (pattern === filename) return true;
+	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
+	if (pattern.startsWith("*")) return filename.endsWith(pattern.slice(1));
+	if (pattern.endsWith("*")) return filename.startsWith(pattern.slice(0, -1));
+	return false;
+}
+
+/**
+ * Check if a file should be ignored based on a list of patterns.
+ */
+function isIgnored(item: string, patterns: string[]): boolean {
+	return patterns.some((p) => matchesPattern(item, p));
+}
+
+/**
  * Default directories to symlink (read-only dependencies).
  * These are never modified by agents, so sharing them saves disk space.
  * Note: build/dist are NOT symlinked to allow agents to run independent builds.
@@ -69,6 +88,17 @@ export const DEFAULT_COPY_PATTERNS = [
 	"pyproject.toml",
 ];
 
+/**
+ * Directories/files that should ALWAYS be ignored (neither copied nor symlinked).
+ */
+export const DEFAULT_IGNORED = [
+	".ralphy-sandboxes",
+	".ralphy-worktrees",
+	"nul",
+	"*.log",
+	"*.sqlite",
+];
+
 export interface SandboxOptions {
 	/** Original working directory */
 	originalDir: string;
@@ -119,8 +149,8 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 	mkdirSync(sandboxDir, { recursive: true });
 
 	try {
-		// Get all items in the original directory
-		const items = readdirSync(originalDir);
+		// Get all items in the original directory, filtering out ignored items
+		const items = readdirSync(originalDir).filter((item) => !isIgnored(item, DEFAULT_IGNORED));
 
 		// Track which items we've handled
 		const handled = new Set<string>();
@@ -153,7 +183,7 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 			if (handled.has(item)) continue;
 
 			const originalPath = join(originalDir, item);
-			const sandboxPath = join(sandboxDir, item);
+			const sandboxPathItem = join(sandboxDir, item);
 
 			// Skip if it's a symlink pointing outside (like node_modules might be)
 			try {
@@ -164,20 +194,34 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 					const target = readlinkSync(originalPath);
 					const resolvedTarget = join(dirname(originalPath), target);
 					if (existsSync(resolvedTarget)) {
-						symlinkSync(target, sandboxPath);
+						symlinkSync(target, sandboxPathItem);
 						symlinksCreated++;
 					} else {
 						logDebug(`Agent ${agentNum}: Skipping broken symlink ${item} -> ${target}`);
 					}
 				} else if (stat.isDirectory()) {
-					// Copy directory recursively, preserving timestamps for change detection
-					cpSync(originalPath, sandboxPath, { recursive: true, preserveTimestamps: true });
-					filesCopied++;
+					// Check if this top-level directory should be symlinked
+					if (symlinkDirs.includes(item)) {
+						symlinkSync(originalPath, sandboxPathItem, "junction");
+						symlinksCreated++;
+					} else {
+						// Copy directory recursively using smart copy
+						const stats = copyRecursive(
+							originalPath,
+							sandboxPathItem,
+							DEFAULT_IGNORED,
+							symlinkDirs,
+							agentNum,
+						);
+						// Count top-level directory as 1 copy (ignoring internal file count)
+						filesCopied++;
+						symlinksCreated += stats.symlinks;
+					}
 				} else if (stat.isFile()) {
 					// Copy file and preserve timestamps for change detection
-					copyFileSync(originalPath, sandboxPath);
+					copyFileSync(originalPath, sandboxPathItem);
 					try {
-						utimesSync(sandboxPath, stat.atime, stat.mtime);
+						utimesSync(sandboxPathItem, stat.atime, stat.mtime);
 					} catch (utimeErr) {
 						logDebug(`Agent ${agentNum}: Failed to preserve timestamps for ${item}: ${utimeErr}`);
 					}
@@ -335,4 +379,99 @@ export function getSandboxBase(workDir: string): string {
 		mkdirSync(sandboxBase, { recursive: true });
 	}
 	return sandboxBase;
+}
+
+/**
+ * Recursively copy a directory:
+ * - Skips directories in 'ignoreNames'
+ * - Creates symlinks for directories in 'symlinkNames' (instead of recursing)
+ * - Copies everything else
+ */
+function copyRecursive(
+	src: string,
+	dest: string,
+	ignoreNames: string[],
+	symlinkNames: string[],
+	agentNum: number,
+): { files: number; symlinks: number } {
+	let files = 0;
+	let symlinks = 0;
+
+	if (!existsSync(src)) return { files, symlinks };
+
+	if (!existsSync(dest)) {
+		mkdirSync(dest, { recursive: true });
+	}
+
+	const items = readdirSync(src);
+	for (const item of items) {
+		// 1. Skip ignored directories (e.g. .ralphy-sandboxes, *.log)
+		if (isIgnored(item, ignoreNames)) {
+			continue;
+		}
+
+		const srcPath = join(src, item);
+		const destPath = join(dest, item);
+
+		try {
+			const stat = lstatSync(srcPath);
+
+			if (stat.isDirectory()) {
+				// 2. Check if this directory should be symlinked instead of copied (e.g. node_modules)
+				if (symlinkNames.includes(item)) {
+					try {
+						// Create a junction/symlink to the SOURCE directory
+						symlinkSync(srcPath, destPath, "junction");
+						logDebug(`Agent ${agentNum}: Symlinked nested dir ${item}`);
+						symlinks++;
+					} catch (symlinkErr) {
+						// Fallback: if symlink fails, try to copy responsibly
+						logDebug(
+							`Agent ${agentNum}: Failed to symlink nested ${item}, falling back to copy: ${symlinkErr}`,
+						);
+						const subStats = copyRecursive(
+							srcPath,
+							destPath,
+							ignoreNames,
+							symlinkNames,
+							agentNum,
+						);
+						files += subStats.files;
+						symlinks += subStats.symlinks;
+					}
+				} else {
+					// 3. Normal directory: recurse
+					const subStats = copyRecursive(
+						srcPath,
+						destPath,
+						ignoreNames,
+						symlinkNames,
+						agentNum,
+					);
+					files++;
+					symlinks += subStats.symlinks;
+				}
+			} else if (stat.isFile()) {
+				copyFileSync(srcPath, destPath);
+				try {
+					utimesSync(destPath, stat.atime, stat.mtime);
+				} catch {
+					// Ignore timestamp errors
+				}
+			} else if (stat.isSymbolicLink()) {
+				const target = readlinkSync(srcPath);
+				try {
+					// For existing symlinks, preserve them
+					const type = stat.isDirectory() ? "junction" : "file";
+					symlinkSync(target, destPath, type);
+				} catch {
+					// Ignore errors
+				}
+			}
+		} catch (err) {
+			logDebug(`Agent ${agentNum}: Failed to copy ${item} in recursive copy: ${err}`);
+		}
+	}
+
+	return { files, symlinks };
 }

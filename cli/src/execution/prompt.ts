@@ -181,8 +181,6 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 		step++;
 	}
 
-	instructions.push(`${step}. Update ${progressFile} with what you did`);
-	step++;
 	if (allowCommit) {
 		instructions.push(`${step}. Commit your changes with a descriptive message`);
 	} else {

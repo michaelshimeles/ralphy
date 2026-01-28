@@ -1,5 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import simpleGit from "simple-git";
 import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
@@ -459,10 +459,24 @@ export async function runParallel(
 			if (!failureReason && aiResult?.success && agentUsedSandbox && worktreeDir) {
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
-					if (modifiedFiles.length > 0) {
+					const filteredFiles = modifiedFiles.filter((f) => {
+						const lowerF = f.toLowerCase();
+						// Skip infrastructure files (.ralphy dir, progress.txt)
+						if (lowerF.startsWith(RALPHY_DIR.toLowerCase()) || basename(f).toLowerCase() === PROGRESS_FILE.toLowerCase()) {
+							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
+							return false;
+						}
+						// Skip invalid Windows paths
+						if (basename(f).toLowerCase() === "nul" || f.trim() === "") {
+							logDebug(`Agent ${agentNum}: Filtered invalid/NUL file path: ${f}`);
+							return false;
+						}
+						return true;
+					});
+					if (filteredFiles.length > 0) {
 						const commitResult = await commitSandboxChanges(
 							workDir,
-							modifiedFiles,
+							filteredFiles,
 							worktreeDir,
 							task.title,
 							agentNum,
