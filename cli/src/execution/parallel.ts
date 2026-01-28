@@ -480,7 +480,7 @@ export async function runParallel(
 							if (pattern.endsWith("/")) {
 								const dir = pattern.slice(0, -1);
 								// Check for exact directory match or if path starts with directory/
-								if (normalized === dir || normalized.startsWith(dir + "/")) {
+								if (normalized === dir || normalized.startsWith(dir + "/") && normalized.charAt(dir.length) === "/") {
 									logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 									return false;
 								}

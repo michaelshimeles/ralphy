@@ -32,7 +32,10 @@ export function matchesPattern(filename: string, pattern: string, isDirectory?: 
 	}
 
 	// Tree match: "dir/**" matches "dir/foo/bar.js"
-	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
+	if (pattern.endsWith("/**")) {
+		const dir = pattern.slice(0, -3);
+		return filename === dir || filename.startsWith(dir + "/");
+	}
 
 	// Suffix match: "*.log" matches "debug.log" (single wildcard at start only)
 	// Uses endsWith() string comparison, not regex - so "." is treated literally
