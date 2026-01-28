@@ -463,7 +463,7 @@ export async function runParallel(
 						const lowerF = f.toLowerCase();
 						// Skip infrastructure files (.ralphy/progress.txt)
 						const normalizedF = lowerF.replace(/\\/g, "/");
-						if (normalizedF === `${RALPHY_DIR.toLowerCase()}/${PROGRESS_FILE.toLowerCase()}`) {
+						if (normalizedF === `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase()) {
 							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 							return false;
 						}
