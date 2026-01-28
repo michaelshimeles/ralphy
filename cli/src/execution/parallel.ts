@@ -490,6 +490,9 @@ export async function runParallel(
 							} else {
 								// File ignores: check basename
 								// e.g. "nul" matches "src/foo/nul"
+								// Note: explicit basename check allows recursive ignoring of global patterns (like "nul" or "*.log")
+								// regardless of their depth in the directory tree. This mimics standard gitignore behavior
+								// for patterns without slashes.
 								const baseName = normalized.split("/").pop() || "";
 								if (matchesPattern(baseName, pattern, false)) {
 									logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
