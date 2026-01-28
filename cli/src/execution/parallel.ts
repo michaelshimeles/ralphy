@@ -461,8 +461,9 @@ export async function runParallel(
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
 						const lowerF = f.toLowerCase();
-						// Skip infrastructure files (.ralphy dir, progress.txt)
-						if (lowerF.startsWith(RALPHY_DIR.toLowerCase()) || basename(f).toLowerCase() === PROGRESS_FILE.toLowerCase()) {
+						// Skip infrastructure files (.ralphy/progress.txt)
+						const normalizedF = lowerF.replace(/\\/g, "/");
+						if (normalizedF === `${RALPHY_DIR.toLowerCase()}/${PROGRESS_FILE.toLowerCase()}`) {
 							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 							return false;
 						}

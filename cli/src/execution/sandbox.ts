@@ -453,7 +453,7 @@ function copyRecursive(
 						symlinkNames,
 						agentNum,
 					);
-					files++;
+					files += subStats.files;
 					symlinks += subStats.symlinks;
 				}
 			} else if (stat.isFile()) {
