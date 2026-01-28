@@ -19,15 +19,25 @@ import { logDebug } from "../ui/logger.ts";
  * Supports: "*.log" (suffix), "prefix*" (prefix), "test.*.js" (middle), "node_modules" (exact), "dir/**" (tree)
  */
 function matchesPattern(filename: string, pattern: string): boolean {
+	// Exact match: "node_modules" matches "node_modules"
 	if (pattern === filename) return true;
+
+	// Tree match: "dir/**" matches "dir/foo/bar.js"
 	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
+
+	// Suffix match: "*.log" matches "debug.log" (single wildcard at start only)
 	if (pattern.startsWith("*") && !pattern.includes("*", 1)) return filename.endsWith(pattern.slice(1));
+
+	// Prefix match: "test*" matches "test123" (single wildcard at end only)
 	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
-	// Handle middle wildcards like "test.*.js"
+
+	// Middle/complex wildcards: "test.*.js" matches "test.foo.js"
+	// Escape regex metacharacters, then convert * to .*
 	if (pattern.includes("*")) {
 		const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, ".*");
 		return new RegExp(`^${escaped}$`).test(filename);
 	}
+
 	return false;
 }
 
