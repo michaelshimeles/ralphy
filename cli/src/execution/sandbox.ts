@@ -29,7 +29,7 @@ function matchesPattern(filename: string, pattern: string): boolean {
 		return regex.test(filename);
 	}
 	return false;
-}
+	return false;
 }
 
 /**
