@@ -16,7 +16,7 @@ import { logDebug } from "../ui/logger.ts";
 
 /**
  * Simple glob matcher to avoid adding heavy dependencies.
- * Supports: "*.log" (wildcard at start/end), "node_modules" (exact match), "dir/**" (prefix match)
+ * Supports: "*.log" (suffix), "prefix*" (prefix), "test.*.js" (middle), "node_modules" (exact), "dir/**" (tree)
  */
 function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern === filename) return true;
@@ -25,8 +25,9 @@ function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
 	// Handle middle wildcards like "test.*.js"
 	if (pattern.includes("*")) {
-		const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-		return regex.test(filename);
+		// Escape regex metacharacters, then convert * to .*
+		const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+		return new RegExp(`^${escaped}$`).test(filename);
 	}
 	return false;
 }
