@@ -22,7 +22,7 @@ function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern === filename) return true;
 	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
 	if (pattern.startsWith("*") && !pattern.includes("*", 1)) return filename.endsWith(pattern.slice(1));
-	if (pattern.endsWith("*") && !pattern.includes("*", 0, pattern.length - 1)) return filename.startsWith(pattern.slice(0, -1));
+	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
 	// Handle middle wildcards like "test.*.js"
 	if (pattern.includes("*")) {
 		const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
@@ -458,19 +458,11 @@ function copyRecursive(
 				}
 			} else if (stat.isFile()) {
 				copyFileSync(srcPath, destPath);
+				files++;
 				try {
 					utimesSync(destPath, stat.atime, stat.mtime);
 				} catch {
 					// Ignore timestamp errors
-				}
-			} else if (stat.isSymbolicLink()) {
-				const target = readlinkSync(srcPath);
-				try {
-					// For existing symlinks, preserve them
-					const type = stat.isDirectory() ? "junction" : "file";
-					symlinkSync(target, destPath, type);
-				} catch {
-					// Ignore errors
 				}
 			}
 		} catch (err) {
