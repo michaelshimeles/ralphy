@@ -124,7 +124,7 @@ export async function commitSandboxChanges(
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
 			await git.commit(commitMessage);
 
-			logDebug(`Agent ${agentNum}: Committed ${modifiedFiles.length} files to ${branchName}`);
+			logDebug(`Agent ${agentNum}: Committed ${filesToAdd.length} files to ${branchName}`);
 
 			// Return to original branch
 			await git.checkout(currentBranch);
@@ -132,7 +132,7 @@ export async function commitSandboxChanges(
 			return {
 				success: true,
 				branchName,
-				filesCommitted: modifiedFiles.length,
+				filesCommitted: filesToAdd.length,
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
