@@ -71,6 +71,25 @@ describe("matchesPattern", () => {
 		it("should not match files outside directory", () => {
 			expect(matchesPattern("lib/foo.js", "src/**")).toBe(false);
 		});
+
+		it("should NOT match directories with same prefix (boundary check)", () => {
+			expect(matchesPattern("srcXtra/foo.js", "src/**")).toBe(false);
+			expect(matchesPattern("src-folder/foo.js", "src/**")).toBe(false);
+		});
+	});
+
+	describe("full path vs basename behavior", () => {
+		it("suffix (*) should match recursively (match full path)", () => {
+			expect(matchesPattern("path/to/debug.log", "*.log")).toBe(true);
+		});
+
+		it("exact match should NOT match recursively (match full path)", () => {
+			expect(matchesPattern("path/to/nul", "nul")).toBe(false); 
+		});
+
+		it("directory match should NOT match prefix-lookalikes", () => {
+			expect(matchesPattern(".ralphy-config", ".ralphy/", true)).toBe(false);
+		});
 	});
 
 	describe("middle wildcard (test.*.js)", () => {

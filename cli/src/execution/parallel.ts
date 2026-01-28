@@ -479,20 +479,19 @@ export async function runParallel(
 						for (const pattern of DEFAULT_IGNORED) {
 							if (pattern.endsWith("/")) {
 								const dir = pattern.slice(0, -1);
-								// Check for exact directory match or if path starts with directory/
-								// We append "/" to ensure we don't partial-match directories like ".ralphy-config".
-								// Note: normalized.startsWith(dir + "/") implicitly confirms the boundary character is "/",
-								// making an explicit `normalized.charAt(dir.length) === "/"` check redundant.
+								// Directory Patterns (e.g. ".ralphy/")
+								// Check for exact directory match or paths strictly inside it.
+								// We append "/" to the prefix check to ensure strict boundary matching,
+								// preventing false positives for lookalike directories (e.g. ".ralphy-config").
 								if (normalized === dir || normalized.startsWith(dir + "/")) {
 									logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 									return false;
 								}
 							} else {
-								// File ignores: check basename
-								// e.g. "nul" matches "src/foo/nul"
-								// Note: explicit basename check allows recursive ignoring of global patterns (like "nul" or "*.log")
-								// regardless of their depth in the directory tree. This mimics standard gitignore behavior
-								// for patterns without slashes.
+								// File/Glob Patterns (e.g. "nul", "*.log")
+								// We pass the basename to matchesPattern() to support recursive filtering.
+								// This ensures patterns like "*.log" match "src/debug.log" anywhere in the tree,
+								// mimicking standard gitignore behavior for patterns without slashes.
 								const baseName = normalized.split("/").pop() || "";
 								if (matchesPattern(baseName, pattern, false)) {
 									logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);

@@ -16,7 +16,13 @@ import { logDebug } from "../ui/logger.ts";
 
 /**
  * Simple glob matcher to avoid adding heavy dependencies.
- * Supports: "*.log" (suffix), "prefix*" (prefix), "test.*.js" (middle), "node_modules" (exact), "dir/**" (tree)
+ * Supports:
+ * - Suffix: "*.log" (matches "debug.log", "path/to/debug.log")
+ * - Prefix: "test*" (matches "test1", "test-file")
+ * - Tree: "node_modules/**" (matches "node_modules", "node_modules/file.js") - Checks strict directory boundary
+ * - Exact: "node_modules" (matches "node_modules")
+ * - Middle: "test.*.js" (matches "test.foo.js") - Uses regex escaping
+ *
  * @internal Exported for testing
  */
 export function matchesPattern(filename: string, pattern: string, isDirectory?: boolean): boolean {
