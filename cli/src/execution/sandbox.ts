@@ -25,8 +25,8 @@ function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
 	// Handle middle wildcards like "test.*.js"
 	if (pattern.includes("*")) {
-		// Escape regex metacharacters, then convert * to .*
-		const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+		// Escape all non-alphanumeric chars except *, then convert * to .*
+		const escaped = pattern.replace(/[^a-zA-Z0-9*]/g, "\\$&").replace(/\*/g, ".*");
 		return new RegExp(`^${escaped}$`).test(filename);
 	}
 	return false;
