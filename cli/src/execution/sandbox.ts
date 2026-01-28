@@ -21,9 +21,15 @@ import { logDebug } from "../ui/logger.ts";
 function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern === filename) return true;
 	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
-	if (pattern.startsWith("*")) return filename.endsWith(pattern.slice(1));
-	if (pattern.endsWith("*")) return filename.startsWith(pattern.slice(0, -1));
+	if (pattern.startsWith("*") && !pattern.includes("*", 1)) return filename.endsWith(pattern.slice(1));
+	if (pattern.endsWith("*") && !pattern.includes("*", 0, pattern.length - 1)) return filename.startsWith(pattern.slice(0, -1));
+	// Handle middle wildcards like "test.*.js"
+	if (pattern.includes("*")) {
+		const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+		return regex.test(filename);
+	}
 	return false;
+}
 }
 
 /**
