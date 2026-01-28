@@ -470,9 +470,11 @@ export async function runParallel(
 						// Normalize path separators (keep case)
 						const normalizedF = f.replace(/\\/g, "/");
 
-						// Check centralized ignore list (case-insensitive for safety)
-						const parts = normalizedF.split("/");
-						if (parts.some((part) => isIgnored(part.toLowerCase(), DEFAULT_IGNORED))) {
+						// Filter files with basenames matching ignore patterns (nul, *.log, etc.)
+						const baseName = normalizedF.split("/").pop() || "";
+						// Check basename case-insensitively for Windows safety
+						// We pass isDirectory=false because we are checking a file's basename
+						if (isIgnored(baseName.toLowerCase(), DEFAULT_IGNORED, false)) {
 							logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
 							return false;
 						}

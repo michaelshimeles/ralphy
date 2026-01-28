@@ -19,9 +19,17 @@ import { logDebug } from "../ui/logger.ts";
  * Supports: "*.log" (suffix), "prefix*" (prefix), "test.*.js" (middle), "node_modules" (exact), "dir/**" (tree)
  * @internal Exported for testing
  */
-export function matchesPattern(filename: string, pattern: string): boolean {
+export function matchesPattern(filename: string, pattern: string, isDirectory?: boolean): boolean {
 	// Exact match: "node_modules" matches "node_modules"
 	if (pattern === filename) return true;
+
+	// Directory match: "node_modules/" matches "node_modules" if it is a directory
+	if (pattern.endsWith("/")) {
+		// If we know it's a file, it can't match a directory pattern
+		if (isDirectory === false) return false;
+		// Check if filename matches pattern without trailing slash
+		return filename === pattern.slice(0, -1);
+	}
 
 	// Tree match: "dir/**" matches "dir/foo/bar.js"
 	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
@@ -48,8 +56,8 @@ export function matchesPattern(filename: string, pattern: string): boolean {
  * Check if a file should be ignored based on a list of patterns.
  * @internal Exported for testing
  */
-export function isIgnored(item: string, patterns: string[]): boolean {
-	return patterns.some((p) => matchesPattern(item, p));
+export function isIgnored(item: string, patterns: string[], isDirectory?: boolean): boolean {
+	return patterns.some((p) => matchesPattern(item, p, isDirectory));
 }
 
 /**
@@ -112,12 +120,10 @@ export const DEFAULT_COPY_PATTERNS = [
  * Agents don't need .ralphy/ - config is read by main runner, progress is tracked by main runner.
  */
 export const DEFAULT_IGNORED = [
-	".ralphy-sandboxes",
-	".ralphy-worktrees",
-	".ralphy", // Agents don't need config or progress - main runner handles these
+	".ralphy-sandboxes/",
+	".ralphy-worktrees/",
+	".ralphy/",
 	"nul",
-	"*.log",
-	"*.sqlite",
 ];
 
 export interface SandboxOptions {
@@ -171,7 +177,18 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 
 	try {
 		// Get all items in the original directory, filtering out ignored items
-		const items = readdirSync(originalDir).filter((item) => !isIgnored(item, DEFAULT_IGNORED));
+		const items = readdirSync(originalDir).filter((item) => {
+			const itemPath = join(originalDir, item);
+			// We need to check if it's a directory to support trailing slash patterns
+			let isDir = false;
+			try {
+				const stat = lstatSync(itemPath);
+				isDir = stat.isDirectory();
+			} catch {
+				// If stat fails, assume false (or skip)
+			}
+			return !isIgnored(item, DEFAULT_IGNORED, isDir);
+		});
 
 		// Track which items we've handled
 		const handled = new Set<string>();
@@ -420,17 +437,23 @@ function copyRecursive(
 
 	const items = readdirSync(src);
 	for (const item of items) {
-		// Skip ignored directories (e.g. .ralphy-sandboxes, *.log)
-		if (isIgnored(item, ignoreNames)) {
+		const srcPath = join(src, item);
+		
+		let stat;
+		try {
+			stat = lstatSync(srcPath);
+		} catch {
 			continue;
 		}
 
-		const srcPath = join(src, item);
+		// Skip ignored items (pass isDirectory flag)
+		if (isIgnored(item, ignoreNames, stat.isDirectory())) {
+			continue;
+		}
+
 		const destPath = join(dest, item);
 
 		try {
-			const stat = lstatSync(srcPath);
-
 			if (stat.isDirectory()) {
 				// Symlink read-only dependency dirs (node_modules, vendor, etc.) even when nested.
 				// This is intentional for performance - agents don't modify dependencies, only source files.

@@ -2,6 +2,19 @@ import { describe, expect, it } from "bun:test";
 import { matchesPattern, isIgnored } from "./sandbox.ts";
 
 describe("matchesPattern", () => {
+	describe("directory match (pattern/)", () => {
+		it("should match directory when isDirectory is true or undefined", () => {
+			expect(matchesPattern("node_modules", "node_modules/")).toBe(true);
+			expect(matchesPattern("node_modules", "node_modules/", true)).toBe(true);
+			expect(matchesPattern(".ralphy", ".ralphy/", true)).toBe(true);
+		});
+
+		it("should NOT match file when isDirectory is false", () => {
+			expect(matchesPattern("node_modules", "node_modules/", false)).toBe(false);
+			expect(matchesPattern(".ralphy", ".ralphy/", false)).toBe(false);
+		});
+	});
+
 	describe("exact match", () => {
 		it("should match exact filenames", () => {
 			expect(matchesPattern("node_modules", "node_modules")).toBe(true);
@@ -91,16 +104,25 @@ describe("isIgnored", () => {
 
 	it("should handle DEFAULT_IGNORED patterns correctly", () => {
 		const DEFAULT_IGNORED = [
-			".ralphy-sandboxes",
-			".ralphy-worktrees",
-			".ralphy",
+			".ralphy-sandboxes/",
+			".ralphy-worktrees/",
+			".ralphy/",
 			"nul",
-			"*.log",
-			"*.sqlite",
 		];
 
+		// Matches because strict=undefined allows directory patterns to match
+		// This simulates typical lenient behavior if type isn't known, or just directory check
 		expect(isIgnored(".ralphy", DEFAULT_IGNORED)).toBe(true);
-		expect(isIgnored("debug.log", DEFAULT_IGNORED)).toBe(true);
+		
+		// Should explicitly match if isDirectory=true
+		expect(isIgnored(".ralphy", DEFAULT_IGNORED, true)).toBe(true);
+		
+		// Should NOT match if isDirectory=false
+		expect(isIgnored(".ralphy", DEFAULT_IGNORED, false)).toBe(false);
+
+		// Removed *.log from ignore list, so these should return false
+		expect(isIgnored("debug.log", DEFAULT_IGNORED)).toBe(false);
+		
 		expect(isIgnored("nul", DEFAULT_IGNORED)).toBe(true);
 		expect(isIgnored("src", DEFAULT_IGNORED)).toBe(false);
 		expect(isIgnored("package.json", DEFAULT_IGNORED)).toBe(false);
