@@ -460,23 +460,11 @@ export async function runParallel(
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
-						// Normalize path separators for cross-platform comparison (Windows \ → /)
-						const normalizedF = f.toLowerCase().replace(/\\/g, "/");
-
-						// Filter .ralphy/progress.txt (exact match only)
-						// The main runner owns progress updates via logTaskProgress() - agents must not commit this
-						const ralphyProgressPath = `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase();
-						if (normalizedF === ralphyProgressPath) {
-							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
-							return false;
-						}
-
 						// Filter invalid Windows paths (nul device, empty strings)
 						if (basename(f).toLowerCase() === "nul" || f.trim() === "") {
 							logDebug(`Agent ${agentNum}: Filtered invalid/NUL file path: ${f}`);
 							return false;
 						}
-
 						return true;
 					});
 					if (filteredFiles.length > 0) {
