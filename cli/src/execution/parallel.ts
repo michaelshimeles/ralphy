@@ -460,10 +460,9 @@ export async function runParallel(
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
-						const lowerF = f.toLowerCase();
-					// Filter only .ralphy/progress.txt (exact match) - other files inside .ralphy/ are kept
-					const normalizedF = lowerF.replace(/\\/g, "/");
-					if (normalizedF === `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase()) {
+						// Filter only .ralphy/progress.txt (exact match) - other files inside .ralphy/ are kept
+						const normalizedF = f.toLowerCase().replace(/\\/g, "/");
+						if (normalizedF === `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase()) {
 							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 							return false;
 						}
