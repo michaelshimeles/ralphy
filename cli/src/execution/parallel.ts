@@ -480,7 +480,10 @@ export async function runParallel(
 							if (pattern.endsWith("/")) {
 								const dir = pattern.slice(0, -1);
 								// Check for exact directory match or if path starts with directory/
-								if (normalized === dir || normalized.startsWith(dir + "/") && normalized.charAt(dir.length) === "/") {
+								// We append "/" to ensure we don't partial-match directories like ".ralphy-config".
+								// Note: normalized.startsWith(dir + "/") implicitly confirms the boundary character is "/",
+								// making an explicit `normalized.charAt(dir.length) === "/"` check redundant.
+								if (normalized === dir || normalized.startsWith(dir + "/")) {
 									logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 									return false;
 								}
