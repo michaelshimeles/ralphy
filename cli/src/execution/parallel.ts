@@ -467,12 +467,12 @@ export async function runParallel(
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
-						// Normalize path separators for cross-platform comparison
-						const normalizedF = f.toLowerCase().replace(/\\/g, "/");
+						// Normalize path separators (keep case)
+						const normalizedF = f.replace(/\\/g, "/");
 
-						// Check centralized ignore list (handles .ralphy, *.log, nul, etc.)
+						// Check centralized ignore list (case-insensitive for safety)
 						const parts = normalizedF.split("/");
-						if (parts.some((part) => isIgnored(part, DEFAULT_IGNORED))) {
+						if (parts.some((part) => isIgnored(part.toLowerCase(), DEFAULT_IGNORED))) {
 							logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
 							return false;
 						}

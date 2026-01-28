@@ -104,8 +104,21 @@ export async function commitSandboxChanges(
 				}
 			}
 
-			// Stage all modified files
-			await git.add(modifiedFiles);
+			// Filter out files ignored by .gitignore to prevent "path is ignored" errors
+			const ignored = await git.checkIgnore(modifiedFiles);
+			const filesToAdd = modifiedFiles.filter((f) => !ignored.includes(f));
+
+			if (filesToAdd.length === 0) {
+				logDebug(`Agent ${agentNum}: No files to add (all were ignored)`);
+				return {
+					success: true,
+					branchName,
+					filesCommitted: 0,
+				};
+			}
+
+			// Stage modified files
+			await git.add(filesToAdd);
 
 			// Commit
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
