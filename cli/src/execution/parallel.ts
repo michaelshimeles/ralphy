@@ -461,8 +461,9 @@ export async function runParallel(
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
 						// Filter only .ralphy/progress.txt (exact match) - other files inside .ralphy/ are kept
+						const ralphyProgressPath = `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase();
 						const normalizedF = f.toLowerCase().replace(/\\/g, "/");
-						if (normalizedF === `${RALPHY_DIR}/${PROGRESS_FILE}`.toLowerCase()) {
+						if (normalizedF === ralphyProgressPath) {
 							logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 							return false;
 						}
