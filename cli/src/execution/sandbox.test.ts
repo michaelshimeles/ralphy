@@ -83,8 +83,10 @@ describe("matchesPattern", () => {
 			expect(matchesPattern("path/to/debug.log", "*.log")).toBe(true);
 		});
 
-		it("exact match should NOT match recursively (match full path)", () => {
+		it("exact match should NOT match recursively if full path is passed (strict internal logic)", () => {
 			expect(matchesPattern("path/to/nul", "nul")).toBe(false); 
+			// In parallel.ts, we pass the basename ("nul") which DOES match, creating recursive behavior via the caller
+			expect(matchesPattern("nul", "nul")).toBe(true);
 		});
 
 		it("directory match should NOT match prefix-lookalikes", () => {
