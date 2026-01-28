@@ -620,7 +620,7 @@ export async function runParallel(
 		// If any retryable failure occurred, stop the run to allow retry later
 		// CHAINING LOGIC: Merge this batch's work into an integration branch
 		// Only do this if we have successful branches and we aren't stopping early
-		if (!skipMerge && !dryRun && !sawRetryableFailure && iteration > 0) {
+		if (!skipMerge && !dryRun && !sawRetryableFailure && completedBranches.length > 0) {
 			// We need to find which branches were successful in THIS batch
 			// refetching from the results array is safer
 			const currentBatchBranches = results
@@ -634,7 +634,8 @@ export async function runParallel(
 					const integrationBranch = await createIntegrationBranch(
 						iteration, 
 						currentBaseBranch, 
-						workDir
+						workDir,
+						originalBaseBranch // Use original base branch as prefix for namespacing
 					);
 					
 					logInfo(`Merging ${currentBatchBranches.length} branch(es) into ${integrationBranch}...`);
@@ -655,21 +656,18 @@ export async function runParallel(
 					currentBaseBranch = integrationBranch;
 					logSuccess(`Batch ${iteration} integrated into ${currentBaseBranch}`);
 					
-					// Remove the merged branches from completedBranches list so we don't try to merge them AGAIN at the end
-					// Actually, the structure of parallel.ts has a final merge phase.
-					// If we are chaining, the final merge phase should effectively merge the *last* integration branch.
-					// So strictly speaking, we should clear completedBranches or update the logic.
-					
-					// Better approach:
-					// If we successfully integrated, those branches are "done".
-					// We only need to track the *currentBaseBranch* as the thing to merge at the very end.
-					// However, the `completedBranches` array is used in the final block.
-					// Let's modify the final block logic instead.
-					
+					// Remove merged branches from completedBranches to avoid re-merging them at the end
+					for (const branch of currentBatchBranches) {
+						const idx = completedBranches.indexOf(branch);
+						if (idx !== -1) {
+							completedBranches.splice(idx, 1);
+						}
+					}					
 				} catch (err) {
 					logError(`Failed to create integration branch: ${err}`);
-					// Continue with current base branch? Or stop?
-					// Probably safer to stop or just warn.
+					logWarn("Integration failed, stopping execution to preserve dependency chain.");
+					// Stop execution because subsequent batches depend on this integration
+					break;
 				}
 			}
 		}
@@ -683,11 +681,14 @@ export async function runParallel(
 	// Merge phase: merge final integration branch back to base branch
 	// If we used integration branches, 'currentBaseBranch' holds the accumulated work.
 	// We need to merge 'currentBaseBranch' into 'originalBaseBranch'.
-	// If we DID NOT use integration branches (e.g. 1 batch or skipped), we fall back to standard merge.
+	// We ALSO need to merge any leftover branches in 'completedBranches' (e.g. if a batch failed to integrate).
 
-	const finalMergeBranch = currentBaseBranch !== originalBaseBranch ? [currentBaseBranch] : completedBranches;
+	const branchesToMerge = [...completedBranches];
+	if (currentBaseBranch !== originalBaseBranch) {
+		branchesToMerge.push(currentBaseBranch);
+	}
 	
-	if (!skipMerge && !dryRun && finalMergeBranch.length > 0) {
+	if (!skipMerge && !dryRun && branchesToMerge.length > 0) {
 		const git = simpleGit(workDir);
 		let stashed = false;
 		try {
@@ -704,30 +705,18 @@ export async function runParallel(
 
 		try {
 			if (currentBaseBranch !== originalBaseBranch) {
-				// We have a chain of integration branches. Merge the final one.
-				logInfo(`Merging final integration branch ${currentBaseBranch} into ${originalBaseBranch}`);
-				
-				// Use mergeAgentBranch for the single final merge
-				// Or use mergeCompletedBranches to get the nice conflict resolution logic for the final step too
-				await mergeCompletedBranches(
-					[currentBaseBranch],
-					originalBaseBranch,
-					engine,
-					workDir,
-					modelOverride,
-					engineArgs
-				);
-			} else {
-				// Standard merge of all individual branches (if no chaining happened)
-				await mergeCompletedBranches(
-					completedBranches,
-					originalBaseBranch,
-					engine,
-					workDir,
-					modelOverride,
-					engineArgs
-				);
+				// We have a chain of integration branches.
+				logInfo(`Merging final integration branch ${currentBaseBranch} and ${completedBranches.length} other(s) into ${originalBaseBranch}`);
 			}
+			
+			await mergeCompletedBranches(
+				branchesToMerge,
+				originalBaseBranch,
+				engine,
+				workDir,
+				modelOverride,
+				engineArgs
+			);
 
 			// Restore starting branch if we're not already on it
 			const currentBranch = await getCurrentBranch(workDir);
