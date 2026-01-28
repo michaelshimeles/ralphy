@@ -404,7 +404,7 @@ function copyRecursive(
 
 	const items = readdirSync(src);
 	for (const item of items) {
-		// 1. Skip ignored directories (e.g. .ralphy-sandboxes, *.log)
+		// Skip ignored directories (e.g. .ralphy-sandboxes, *.log)
 		if (isIgnored(item, ignoreNames)) {
 			continue;
 		}
@@ -416,7 +416,9 @@ function copyRecursive(
 			const stat = lstatSync(srcPath);
 
 			if (stat.isDirectory()) {
-				// 2. Check if this directory should be symlinked instead of copied (e.g. node_modules)
+				// Symlink read-only dependency dirs (node_modules, vendor, etc.) even when nested.
+				// This is intentional for performance - agents don't modify dependencies, only source files.
+				// Sharing these across sandboxes avoids duplicating GBs of packages per agent.
 				if (symlinkNames.includes(item)) {
 					try {
 						// Create a junction/symlink to the SOURCE directory
@@ -439,7 +441,7 @@ function copyRecursive(
 						symlinks += subStats.symlinks;
 					}
 				} else {
-					// 3. Normal directory: recurse
+					// Normal directory: recurse
 					const subStats = copyRecursive(
 						srcPath,
 						destPath,
