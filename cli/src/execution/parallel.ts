@@ -34,6 +34,7 @@ import {
 	getModifiedFiles,
 	getSandboxBase,
 	isIgnored,
+	matchesPattern,
 } from "./sandbox.ts";
 import type { ExecutionOptions, ExecutionResult } from "./sequential.ts";
 
@@ -470,18 +471,36 @@ export async function runParallel(
 						// Normalize path separators (keep case)
 						const normalizedF = f.replace(/\\/g, "/");
 
-						// Filter files with basenames matching ignore patterns (nul, *.log, etc.)
-						const baseName = normalizedF.split("/").pop() || "";
-						// Check basename case-insensitively for Windows safety
-						// We pass isDirectory=false because we are checking a file's basename
-						if (isIgnored(baseName.toLowerCase(), DEFAULT_IGNORED, false)) {
-							logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
-							return false;
-						}
-
 						// Filter empty strings
 						if (f.trim() === "") {
 							return false;
+						}
+
+						const normalizedLower = normalizedF.toLowerCase();
+						const baseName = normalizedF.split("/").pop() || "";
+						const baseNameLower = baseName.toLowerCase();
+
+						// Check against all default ignore patterns
+						for (const pattern of DEFAULT_IGNORED) {
+							const patternLower = pattern.toLowerCase();
+							
+							// Directory ignores (end with /)
+							if (pattern.endsWith("/")) {
+								// Check if path starts with directory
+								// e.g. ".ralphy/" matches ".ralphy/progress.txt"
+								if (normalizedLower.startsWith(patternLower) || normalizedLower === patternLower.slice(0, -1)) {
+									logDebug(`Agent ${agentNum}: Filtered infrastructure file (dir): ${f}`);
+									return false;
+								}
+							} else {
+								// File ignores: check basename
+								// e.g. "nul" matches "src/foo/nul"
+								// We pass isDirectory=false because we are checking a file's basename
+								if (matchesPattern(baseNameLower, pattern, false)) {
+									logDebug(`Agent ${agentNum}: Filtered ignored file (base): ${f}`);
+									return false;
+								}
+							}
 						}
 
 						return true;
