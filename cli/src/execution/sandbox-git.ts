@@ -105,7 +105,7 @@ export async function commitSandboxChanges(
 			}
 
 			// Filter out files ignored by .gitignore to prevent "path is ignored" errors
-			const ignored = await git.checkIgnore(modifiedFiles);
+			const ignored = (await git.checkIgnore(modifiedFiles)) || [];
 			const filesToAdd = modifiedFiles.filter((f) => !ignored.includes(f));
 
 			if (filesToAdd.length === 0) {
