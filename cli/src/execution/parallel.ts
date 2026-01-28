@@ -488,8 +488,8 @@ export async function runParallel(
 							if (pattern.endsWith("/")) {
 								// Check if path starts with directory
 								// e.g. ".ralphy/" matches ".ralphy/progress.txt"
-								// BUT match exact directory or directory prefix to avoid partial matches like ".ralphy-config"
-								if (normalizedLower === patternLower.slice(0, -1) || normalizedLower.startsWith(patternLower)) {
+								// Match exact directory or ensure it's followed by a path separator
+								if (normalizedLower === patternLower.slice(0, -1) || normalizedLower.startsWith(patternLower) || normalizedLower.startsWith(patternLower.slice(0, -1) + "/")) {
 									logDebug(`Agent ${agentNum}: Filtered infrastructure file (dir): ${f}`);
 									return false;
 								}
