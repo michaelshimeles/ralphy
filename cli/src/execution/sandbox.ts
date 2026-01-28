@@ -206,23 +206,17 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 						logDebug(`Agent ${agentNum}: Skipping broken symlink ${item} -> ${target}`);
 					}
 				} else if (stat.isDirectory()) {
-					// Check if this top-level directory should be symlinked
-					if (symlinkDirs.includes(item)) {
-						symlinkSync(originalPath, sandboxPathItem, "junction");
-						symlinksCreated++;
-					} else {
-						// Copy directory recursively using smart copy
-						const stats = copyRecursive(
-							originalPath,
-							sandboxPathItem,
-							DEFAULT_IGNORED,
-							symlinkDirs,
-							agentNum,
-						);
-						// Count top-level directory as 1 copy (ignoring internal file count)
-						filesCopied++;
-						symlinksCreated += stats.symlinks;
-					}
+					// Copy directory recursively using smart copy
+					const stats = copyRecursive(
+						originalPath,
+						sandboxPathItem,
+						DEFAULT_IGNORED,
+						symlinkDirs,
+						agentNum,
+					);
+					// Count top-level directory as 1 copy (ignoring internal file count)
+					filesCopied++;
+					symlinksCreated += stats.symlinks;
 				} else if (stat.isFile()) {
 					// Copy file and preserve timestamps for change detection
 					copyFileSync(originalPath, sandboxPathItem);
