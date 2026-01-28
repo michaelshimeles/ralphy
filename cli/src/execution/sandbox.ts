@@ -105,11 +105,12 @@ export const DEFAULT_COPY_PATTERNS = [
 
 /**
  * Directories/files that should ALWAYS be ignored (neither copied nor symlinked).
+ * Agents don't need .ralphy/ - config is read by main runner, progress is tracked by main runner.
  */
 export const DEFAULT_IGNORED = [
 	".ralphy-sandboxes",
 	".ralphy-worktrees",
-	".ralphy/progress.txt", // Main runner owns progress updates, agents don't need this
+	".ralphy", // Agents don't need config or progress - main runner handles these
 	"nul",
 	"*.log",
 	"*.sqlite",
