@@ -9,6 +9,7 @@ import { syncPrdToIssue } from "../git/issue-sync.ts";
 import {
 	abortMerge,
 	analyzePreMerge,
+	createIntegrationBranch,
 	deleteLocalBranch,
 	mergeAgentBranch,
 	sortByConflictLikelihood,
@@ -310,6 +311,9 @@ export async function runParallel(
 	// Track processed tasks in dry-run mode (since we don't modify the source file)
 	const dryRunProcessedIds = new Set<string>();
 
+	// Track the current base branch for chaining (integration branch pattern)
+	let currentBaseBranch = originalBaseBranch;
+
 	// Process tasks in batches
 	let iteration = 0;
 
@@ -409,7 +413,7 @@ export async function runParallel(
 				engine,
 				task,
 				globalAgentNum,
-				baseBranch,
+				currentBaseBranch,
 				isolationBase,
 				workDir,
 				prdSource,
@@ -466,11 +470,14 @@ export async function runParallel(
 							worktreeDir,
 							task.title,
 							agentNum,
-							originalBaseBranch,
+							currentBaseBranch,
 						);
 
 						if (commitResult.success) {
+							// Update branches map or result to ensure we track the generated branch
 							branchName = commitResult.branchName;
+							// Update the agentResult in place so we can find it later
+							agentResult.branchName = branchName;
 							logDebug(
 								`Agent ${agentNum}: Committed ${commitResult.filesCommitted} files to ${branchName}`,
 							);
@@ -611,14 +618,76 @@ export async function runParallel(
 		const batchDuration = formatDuration(Date.now() - batchStartTime);
 		logInfo(`Batch ${iteration} completed in ${batchDuration}`);
 		// If any retryable failure occurred, stop the run to allow retry later
+		// CHAINING LOGIC: Merge this batch's work into an integration branch
+		// Only do this if we have successful branches and we aren't stopping early
+		if (!skipMerge && !dryRun && !sawRetryableFailure && iteration > 0) {
+			// We need to find which branches were successful in THIS batch
+			// refetching from the results array is safer
+			const currentBatchBranches = results
+				.map(r => r.branchName) // This might be empty if failed
+				.filter(b => b && completedBranches.includes(b));
+				
+			if (currentBatchBranches.length > 0) {
+				try {
+					logInfo(`Creating integration branch for batch ${iteration}...`);
+					// Create integration branch from current base
+					const integrationBranch = await createIntegrationBranch(
+						iteration, 
+						currentBaseBranch, 
+						workDir
+					);
+					
+					logInfo(`Merging ${currentBatchBranches.length} branch(es) into ${integrationBranch}...`);
+					
+					// Merge the batch's branches into the integration branch
+					// We use a cleaner merge function or the existing mergeCompletedBranches logic?
+					// Use mergeCompletedBranches but pointed at the integration branch
+					await mergeCompletedBranches(
+						currentBatchBranches,
+						integrationBranch,
+						engine,
+						workDir,
+						modelOverride,
+						engineArgs
+					);
+					
+					// Update current base branch for the next batch
+					currentBaseBranch = integrationBranch;
+					logSuccess(`Batch ${iteration} integrated into ${currentBaseBranch}`);
+					
+					// Remove the merged branches from completedBranches list so we don't try to merge them AGAIN at the end
+					// Actually, the structure of parallel.ts has a final merge phase.
+					// If we are chaining, the final merge phase should effectively merge the *last* integration branch.
+					// So strictly speaking, we should clear completedBranches or update the logic.
+					
+					// Better approach:
+					// If we successfully integrated, those branches are "done".
+					// We only need to track the *currentBaseBranch* as the thing to merge at the very end.
+					// However, the `completedBranches` array is used in the final block.
+					// Let's modify the final block logic instead.
+					
+				} catch (err) {
+					logError(`Failed to create integration branch: ${err}`);
+					// Continue with current base branch? Or stop?
+					// Probably safer to stop or just warn.
+				}
+			}
+		}
+
 		if (sawRetryableFailure) {
 			logWarn("Stopping early due to retryable errors. Try again later.");
 			break;
 		}
 	}
 
-	// Merge phase: merge completed branches back to base branch
-	if (!skipMerge && !dryRun && completedBranches.length > 0) {
+	// Merge phase: merge final integration branch back to base branch
+	// If we used integration branches, 'currentBaseBranch' holds the accumulated work.
+	// We need to merge 'currentBaseBranch' into 'originalBaseBranch'.
+	// If we DID NOT use integration branches (e.g. 1 batch or skipped), we fall back to standard merge.
+
+	const finalMergeBranch = currentBaseBranch !== originalBaseBranch ? [currentBaseBranch] : completedBranches;
+	
+	if (!skipMerge && !dryRun && finalMergeBranch.length > 0) {
 		const git = simpleGit(workDir);
 		let stashed = false;
 		try {
@@ -634,14 +703,31 @@ export async function runParallel(
 		}
 
 		try {
-			await mergeCompletedBranches(
-				completedBranches,
-				originalBaseBranch,
-				engine,
-				workDir,
-				modelOverride,
-				engineArgs,
-			);
+			if (currentBaseBranch !== originalBaseBranch) {
+				// We have a chain of integration branches. Merge the final one.
+				logInfo(`Merging final integration branch ${currentBaseBranch} into ${originalBaseBranch}`);
+				
+				// Use mergeAgentBranch for the single final merge
+				// Or use mergeCompletedBranches to get the nice conflict resolution logic for the final step too
+				await mergeCompletedBranches(
+					[currentBaseBranch],
+					originalBaseBranch,
+					engine,
+					workDir,
+					modelOverride,
+					engineArgs
+				);
+			} else {
+				// Standard merge of all individual branches (if no chaining happened)
+				await mergeCompletedBranches(
+					completedBranches,
+					originalBaseBranch,
+					engine,
+					workDir,
+					modelOverride,
+					engineArgs
+				);
+			}
 
 			// Restore starting branch if we're not already on it
 			const currentBranch = await getCurrentBranch(workDir);
