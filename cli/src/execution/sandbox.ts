@@ -109,6 +109,7 @@ export const DEFAULT_COPY_PATTERNS = [
 export const DEFAULT_IGNORED = [
 	".ralphy-sandboxes",
 	".ralphy-worktrees",
+	".ralphy/progress.txt", // Main runner owns progress updates, agents don't need this
 	"nul",
 	"*.log",
 	"*.sqlite",
