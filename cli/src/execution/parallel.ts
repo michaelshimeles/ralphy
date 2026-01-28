@@ -27,7 +27,14 @@ import { clearDeferredTask, recordDeferredTask } from "./deferred.ts";
 import { buildParallelPrompt } from "./prompt.ts";
 import { isRetryableError, withRetry } from "./retry.ts";
 import { commitSandboxChanges } from "./sandbox-git.ts";
-import { cleanupSandbox, createSandbox, getModifiedFiles, getSandboxBase } from "./sandbox.ts";
+import {
+	cleanupSandbox,
+	createSandbox,
+	DEFAULT_IGNORED,
+	getModifiedFiles,
+	getSandboxBase,
+	isIgnored,
+} from "./sandbox.ts";
 import type { ExecutionOptions, ExecutionResult } from "./sequential.ts";
 
 interface ParallelAgentResult {
@@ -460,11 +467,21 @@ export async function runParallel(
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
-						// Filter invalid Windows paths (nul device, empty strings)
-						if (basename(f).toLowerCase() === "nul" || f.trim() === "") {
-							logDebug(`Agent ${agentNum}: Filtered invalid/NUL file path: ${f}`);
+						// Normalize path separators for cross-platform comparison
+						const normalizedF = f.toLowerCase().replace(/\\/g, "/");
+
+						// Check centralized ignore list (handles .ralphy, *.log, nul, etc.)
+						const parts = normalizedF.split("/");
+						if (parts.some((part) => isIgnored(part, DEFAULT_IGNORED))) {
+							logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
 							return false;
 						}
+
+						// Filter empty strings
+						if (f.trim() === "") {
+							return false;
+						}
+
 						return true;
 					});
 					if (filteredFiles.length > 0) {
