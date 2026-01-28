@@ -468,39 +468,28 @@ export async function runParallel(
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
 					const filteredFiles = modifiedFiles.filter((f) => {
-						// Normalize path separators (keep case)
-						const normalizedF = f.replace(/\\/g, "/");
 
-						// Filter empty strings
 						if (f.trim() === "") {
 							return false;
 						}
 
-						const normalizedLower = normalizedF.toLowerCase();
-						const baseName = normalizedF.split("/").pop() || "";
-						const baseNameLower = baseName.toLowerCase();
+						const normalized = f.replace(/\\/g, "/");
 
 						// Check against all default ignore patterns
 						for (const pattern of DEFAULT_IGNORED) {
-							const patternLower = pattern.toLowerCase();
-							
-							// Directory ignores (end with /)
 							if (pattern.endsWith("/")) {
-								// Check if path starts with directory
-								// e.g. ".ralphy/" matches ".ralphy/progress.txt"
-								// Match exact directory or ensure it's followed by a path separator
-								if (normalizedLower === patternLower.slice(0, -1) || normalizedLower.startsWith(patternLower) || normalizedLower.startsWith(patternLower.slice(0, -1) + "/")) {
-									logDebug(`Agent ${agentNum}: Filtered infrastructure file (dir): ${f}`);
+								const dir = pattern.slice(0, -1);
+								// Check for exact directory match or if path starts with directory/
+								if (normalized === dir || normalized.startsWith(pattern)) {
+									logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
 									return false;
 								}
 							} else {
 								// File ignores: check basename
 								// e.g. "nul" matches "src/foo/nul"
-								// We pass isDirectory=false because we are checking a file's basename
-								// We explicitly lowercase both inputs to ensure consistent case-insensitive matching
-								// regardless of pattern casing definition
-								if (matchesPattern(baseNameLower, patternLower, false)) {
-									logDebug(`Agent ${agentNum}: Filtered ignored file (base): ${f}`);
+								const baseName = normalized.split("/").pop() || "";
+								if (matchesPattern(baseName, pattern, false)) {
+									logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
 									return false;
 								}
 							}
