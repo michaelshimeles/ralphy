@@ -17,8 +17,9 @@ import { logDebug } from "../ui/logger.ts";
 /**
  * Simple glob matcher to avoid adding heavy dependencies.
  * Supports: "*.log" (suffix), "prefix*" (prefix), "test.*.js" (middle), "node_modules" (exact), "dir/**" (tree)
+ * @internal Exported for testing
  */
-function matchesPattern(filename: string, pattern: string): boolean {
+export function matchesPattern(filename: string, pattern: string): boolean {
 	// Exact match: "node_modules" matches "node_modules"
 	if (pattern === filename) return true;
 
@@ -26,9 +27,11 @@ function matchesPattern(filename: string, pattern: string): boolean {
 	if (pattern.endsWith("/**") && filename.startsWith(pattern.slice(0, -3))) return true;
 
 	// Suffix match: "*.log" matches "debug.log" (single wildcard at start only)
+	// Uses endsWith() string comparison, not regex - so "." is treated literally
 	if (pattern.startsWith("*") && !pattern.includes("*", 1)) return filename.endsWith(pattern.slice(1));
 
 	// Prefix match: "test*" matches "test123" (single wildcard at end only)
+	// Uses startsWith() string comparison, not regex - so "." is treated literally
 	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
 
 	// Middle/complex wildcards: "test.*.js" matches "test.foo.js"
@@ -43,8 +46,9 @@ function matchesPattern(filename: string, pattern: string): boolean {
 
 /**
  * Check if a file should be ignored based on a list of patterns.
+ * @internal Exported for testing
  */
-function isIgnored(item: string, patterns: string[]): boolean {
+export function isIgnored(item: string, patterns: string[]): boolean {
 	return patterns.some((p) => matchesPattern(item, p));
 }
 
