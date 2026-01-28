@@ -488,7 +488,8 @@ export async function runParallel(
 							if (pattern.endsWith("/")) {
 								// Check if path starts with directory
 								// e.g. ".ralphy/" matches ".ralphy/progress.txt"
-								if (normalizedLower.startsWith(patternLower) || normalizedLower === patternLower.slice(0, -1)) {
+								// BUT match exact directory or directory prefix to avoid partial matches like ".ralphy-config"
+								if (normalizedLower === patternLower.slice(0, -1) || normalizedLower.startsWith(patternLower)) {
 									logDebug(`Agent ${agentNum}: Filtered infrastructure file (dir): ${f}`);
 									return false;
 								}
@@ -496,6 +497,8 @@ export async function runParallel(
 								// File ignores: check basename
 								// e.g. "nul" matches "src/foo/nul"
 								// We pass isDirectory=false because we are checking a file's basename
+								// We explicitly lowercase both inputs to ensure consistent case-insensitive matching
+								// regardless of pattern casing definition
 								if (matchesPattern(baseNameLower, patternLower, false)) {
 									logDebug(`Agent ${agentNum}: Filtered ignored file (base): ${f}`);
 									return false;
