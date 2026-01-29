@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { slugify } from "../git/branch.ts";
 import { logDebug } from "../ui/logger.ts";
+import { DEFAULT_IGNORED, matchesPattern } from "./sandbox.ts";
 
 /**
  * Simple mutex to serialize git operations across sandbox agents.
@@ -65,13 +66,9 @@ export async function commitSandboxChanges(
 	agentNum: number,
 	baseBranch: string,
 ): Promise<SandboxCommitResult> {
-	if (modifiedFiles.length === 0) {
-		return {
-			success: true,
-			branchName: "",
-			filesCommitted: 0,
-		};
-	}
+	// Note: We don't return early even if modifiedFiles is empty,
+	// because composer/npm may have installed files in symlinked directories
+	// that we need to detect via git status in Phase 2.
 
 	const uniqueId = generateUniqueId();
 	const branchName = `ralphy/agent-${agentNum}-${uniqueId}-${slugify(taskName)}`;
@@ -104,22 +101,62 @@ export async function commitSandboxChanges(
 				}
 			}
 
-			// Catch-All: Stage EVERYTHING that is not ignored, but EXCLUDE progress log.
-			// File is at .ralphy/progress.txt, so we invoke pathspec to exclude it.
-			try {
-				await git.add([".", ":!.ralphy/progress.txt"]);
-			} catch (addErr) {
-				// Fallback if pathspec fails
-				logDebug(`Agent ${agentNum}: Smart add failed, falling back to standard add: ${addErr}`);
-				await git.add(".");
-				// Try to reset both possible locations
-				try { await git.reset([".ralphy/progress.txt"]); } catch {}
+			// TWO-PHASE STAGING APPROACH:
+			// Phase 1: Stage the explicitly filtered files passed from parallel.ts
+			// These are source files the agent intentionally modified
+			if (modifiedFiles.length > 0) {
+				const filesToStage = modifiedFiles.filter((f) => {
+					const fullPath = join(originalDir, f);
+					return existsSync(fullPath);
+				});
+				if (filesToStage.length > 0) {
+					await git.add(filesToStage);
+					logDebug(`Agent ${agentNum}: Staged ${filesToStage.length} filtered files`);
+				}
+			}
+
+			// Phase 2: Find additional untracked/modified files via git status
+			// This catches files installed by composer/npm in symlinked directories
+			// that aren't detected by the sandbox file comparison
+			const status = await git.status();
+			const additionalFiles: string[] = [];
+
+			// Collect untracked and modified files, excluding infrastructure
+			// Uses same logic as parallel.ts for consistency
+			for (const file of [...status.not_added, ...status.modified, ...status.created]) {
+				const normalized = file.replace(/\\/g, "/");
+				let isInfra = false;
+
+				for (const pattern of DEFAULT_IGNORED) {
+					if (pattern.endsWith("/")) {
+						const dir = pattern.slice(0, -1);
+						if (normalized === dir || normalized.startsWith(dir + "/")) {
+							isInfra = true;
+							break;
+						}
+					} else {
+						const baseName = normalized.split("/").pop() || "";
+						if (matchesPattern(baseName, pattern, false)) {
+							isInfra = true;
+							break;
+						}
+					}
+				}
+
+				if (!isInfra && !modifiedFiles.includes(file)) {
+					additionalFiles.push(file);
+				}
+			}
+
+			if (additionalFiles.length > 0) {
+				await git.add(additionalFiles);
+				logDebug(`Agent ${agentNum}: Staged ${additionalFiles.length} additional files (composer/npm installs)`);
 			}
 
 			// Check if we have anything to commit
-			const status = await git.status();
-			if (status.staged.length === 0) {
-				logDebug(`Agent ${agentNum}: No changes to commit after 'git add .'`);
+			const finalStatus = await git.status();
+			if (finalStatus.staged.length === 0) {
+				logDebug(`Agent ${agentNum}: No changes to commit after staging`);
 				await git.checkout(currentBranch);
 				return {
 					success: true,
@@ -132,7 +169,7 @@ export async function commitSandboxChanges(
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
 			await git.commit(commitMessage);
 
-			logDebug(`Agent ${agentNum}: Committed ${status.staged.length} files to ${branchName}`);
+			logDebug(`Agent ${agentNum}: Committed ${finalStatus.staged.length} files to ${branchName}`);
 
 			// Return to original branch
 			await git.checkout(currentBranch);
@@ -140,7 +177,7 @@ export async function commitSandboxChanges(
 			return {
 				success: true,
 				branchName,
-				filesCommitted: status.staged.length,
+				filesCommitted: finalStatus.staged.length,
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
