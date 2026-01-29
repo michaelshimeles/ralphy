@@ -39,6 +39,44 @@ function generateUniqueId(): string {
 	return `${timestamp}-${random}`;
 }
 
+/** Safe git add: batches files (avoids ENAMETOOLONG) and filters ignored files */
+async function safeGitAdd(git: SimpleGit, files: string[]): Promise<number> {
+	if (!files?.length) return 0;
+
+	// Filter out ignored files first
+	const ignoredSet = new Set<string>();
+	for (let i = 0; i < files.length; i += 50) {
+		try {
+			const result = await git.checkIgnore(files.slice(i, i + 50));
+			result.forEach((f) => ignoredSet.add(f.replace(/\\/g, "/")));
+		} catch { /* check-ignore exits 1 if nothing ignored */ }
+	}
+	const filtered = ignoredSet.size > 0
+		? files.filter((f) => !ignoredSet.has(f.replace(/\\/g, "/")))
+		: files;
+
+	if (!filtered.length) return 0;
+
+	// Add in batches with retry for lock contention
+	for (let i = 0; i < filtered.length; i += 50) {
+		const batch = filtered.slice(i, i + 50);
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				await git.add(batch);
+				break;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				if ((msg.includes("index.lock") || msg.includes("lock file")) && attempt < 3) {
+					await new Promise((r) => setTimeout(r, attempt * 500));
+					continue;
+				}
+				throw err;
+			}
+		}
+	}
+	return filtered.length;
+}
+
 /**
  * Result of committing sandbox changes to a branch
  */
@@ -109,9 +147,9 @@ export async function commitSandboxChanges(
 					const fullPath = join(originalDir, f);
 					return existsSync(fullPath);
 				});
-				if (filesToStage.length > 0) {
-					await git.add(filesToStage);
-					logDebug(`Agent ${agentNum}: Staged ${filesToStage.length} filtered files`);
+				const staged = await safeGitAdd(git, filesToStage);
+				if (staged > 0) {
+					logDebug(`Agent ${agentNum}: Staged ${staged} filtered files`);
 				}
 			}
 
@@ -153,8 +191,10 @@ export async function commitSandboxChanges(
 			}
 
 			if (additionalFiles.length > 0) {
-				await git.add(additionalFiles);
-				logDebug(`Agent ${agentNum}: Staged ${additionalFiles.length} additional files (composer/npm installs)`);
+				const staged = await safeGitAdd(git, additionalFiles);
+				if (staged > 0) {
+					logDebug(`Agent ${agentNum}: Staged ${staged} additional files (composer/npm installs)`);
+				}
 			}
 
 			// Check if we have anything to commit
