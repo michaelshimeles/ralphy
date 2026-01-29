@@ -88,7 +88,7 @@ ralphy --codex      # Codex
 ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
-ralphy --ollama     # Ollama (local models)
+ralphy --gemini     # Gemini CLI
 ```
 
 ### Model Override
@@ -157,6 +157,24 @@ tasks:
   - title: add dashboard
     completed: false
 ```
+
+**JSON**:
+```bash
+ralphy --json PRD.json
+```
+```json
+{
+  "tasks": [
+    {
+      "title": "create auth",
+      "completed": false,
+      "parallel_group": 1,
+      "description": "Optional details"
+    }
+  ]
+}
+```
+Titles must be unique.
 
 **GitHub Issues**:
 ```bash
@@ -280,8 +298,10 @@ ralphy --parallel --sandbox
 |------|--------------|
 | `--prd PATH` | task file or folder (auto-detected, default: PRD.md) |
 | `--yaml FILE` | YAML task file |
+| `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
+| `--sync-issue N` | sync PRD progress to GitHub issue #N |
 | `--model NAME` | override model for any engine |
 | `--sonnet` | shortcut for `--claude --model sonnet` |
 | `--parallel` | run parallel |
@@ -310,7 +330,7 @@ ralphy --parallel --sandbox
 ## Requirements
 
 **Required:**
-- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli), or [Ollama](https://ollama.com) (requires Claude Code CLI)
+- AI CLI: [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://opencode.ai/docs/), [Cursor](https://cursor.com), Codex, Qwen-Code, [Factory Droid](https://docs.factory.ai/cli/getting-started/quickstart), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
 **npm version (`ralphy-cli`):**
 - Node.js 18+ or Bun
@@ -335,7 +355,7 @@ ralphy --parallel --sandbox
 | Qwen | `qwen` | `--approval-mode yolo` | tokens |
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `-p` flag | duration |
-| Ollama | `claude` | `--dangerously-skip-permissions` | tokens + cost |
+| Gemini | `gemini` | `--yolo` | tokens + cost |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 
@@ -343,10 +363,14 @@ When an engine exits non-zero, ralphy includes the last lines of CLI output in t
 
 ## Changelog
 
+### v4.7.0
+- **JSON PRD support**: new `--json` flag to use JSON files as task sources with support for parallel groups and task descriptions
+
 ### v4.6.0
-- **Ollama support**: use local models via Ollama's Anthropic-compatible API (`--ollama`)
-- recommended models: `qwen3-coder`, `glm-4.7`, `gpt-oss:20b`, `gpt-oss:120b`
-- requires [Ollama](https://ollama.com) running locally and Claude Code CLI installed
+- **Gemini CLI support**: new `--gemini` engine option for Google Gemini CLI
+- **GitHub issue sync**: `--sync-issue <number>` syncs PRD progress to a GitHub issue after each task
+- **performance improvements**: reduced redundant file reads, exponential backoff for retries, non-blocking logging, operation timing visibility
+- **version fix**: CLI version now reads dynamically from package.json
 
 ### v4.5.3
 - parallel reliability: fallback to sandbox mode on worktree errors

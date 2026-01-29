@@ -2,10 +2,12 @@ export * from "./types.ts";
 export * from "./markdown.ts";
 export * from "./markdown-folder.ts";
 export * from "./yaml.ts";
+export * from "./json.ts";
 export * from "./github.ts";
 export * from "./cached-task-source.ts";
 
 import { GitHubTaskSource } from "./github.ts";
+import { JsonTaskSource } from "./json.ts";
 import { MarkdownFolderTaskSource } from "./markdown-folder.ts";
 import { MarkdownTaskSource } from "./markdown.ts";
 import type { TaskSource, TaskSourceType } from "./types.ts";
@@ -43,6 +45,12 @@ export function createTaskSource(options: TaskSourceOptions): TaskSource {
 				throw new Error("filePath is required for yaml task source");
 			}
 			return new YamlTaskSource(options.filePath);
+
+		case "json":
+			if (!options.filePath) {
+				throw new Error("filePath is required for json task source");
+			}
+			return new JsonTaskSource(options.filePath);
 
 		case "github":
 			if (!options.repo) {

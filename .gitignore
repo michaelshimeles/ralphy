@@ -3,6 +3,7 @@ cli/node_modules/
 
 # CLI Build output
 cli/dist/
+cli/src/version.ts
 
 # Landing page
 landing/node_modules/

@@ -1,6 +1,7 @@
 import { logTaskProgress } from "../config/writer.ts";
 import type { AIEngine, AIResult } from "../engines/types.ts";
 import { createTaskBranch, returnToBaseBranch } from "../git/branch.ts";
+import { syncPrdToIssue } from "../git/issue-sync.ts";
 import { createPullRequest } from "../git/pr.ts";
 import type { Task, TaskSource } from "../tasks/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
@@ -37,6 +38,8 @@ export interface ExecutionOptions {
 	useSandbox?: boolean;
 	/** Additional arguments to pass to the engine CLI */
 	engineArgs?: string[];
+	/** GitHub issue number to sync PRD with on each iteration */
+	syncIssue?: number;
 }
 
 export interface ExecutionResult {
@@ -69,6 +72,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		activeSettings,
 		modelOverride,
 		engineArgs,
+		syncIssue,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -175,6 +179,11 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 					await taskSource.markComplete(task.id);
 					logTaskProgress(task.title, "completed", workDir);
 					result.tasksCompleted++;
+
+					// Sync PRD to GitHub issue if configured
+					if (syncIssue && options.prdFile) {
+						await syncPrdToIssue(options.prdFile, syncIssue, workDir);
+					}
 
 					notifyTaskComplete(task.title);
 					clearDeferredTask(taskSource.type, task, workDir, options.prdFile);

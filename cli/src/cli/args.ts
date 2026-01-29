@@ -1,8 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { Command } from "commander";
 import type { RuntimeOptions } from "../config/types.ts";
-
-const VERSION = "4.3.0";
+import { VERSION } from "../version.ts";
 
 /**
  * Create the CLI program with all options
@@ -30,7 +29,7 @@ export function createProgram(): Command {
 		.option("--qwen", "Use Qwen-Code")
 		.option("--droid", "Use Factory Droid")
 		.option("--copilot", "Use GitHub Copilot")
-		.option("--ollama", "Use Ollama (local models via Claude Code)")
+		.option("--gemini", "Use Gemini CLI")
 		.option("--dry-run", "Show what would be done without executing")
 		.option("--max-iterations <n>", "Maximum iterations (0 = unlimited)", "0")
 		.option("--max-retries <n>", "Maximum retries per task", "3")
@@ -47,8 +46,10 @@ export function createProgram(): Command {
 		.option("--draft-pr", "Create PRs as draft")
 		.option("--prd <path>", "PRD file or folder (auto-detected)", "PRD.md")
 		.option("--yaml <file>", "YAML task file")
+		.option("--json <file>", "JSON task file")
 		.option("--github <repo>", "GitHub repo for issues (owner/repo)")
 		.option("--github-label <label>", "Filter GitHub issues by label")
+		.option("--sync-issue <number>", "Sync PRD file to GitHub issue body on each iteration")
 		.option("--no-commit", "Don't auto-commit changes")
 		.option("--browser", "Enable browser automation (agent-browser)")
 		.option("--no-browser", "Disable browser automation")
@@ -96,17 +97,21 @@ export function parseArgs(args: string[]): {
 	else if (opts.qwen) aiEngine = "qwen";
 	else if (opts.droid) aiEngine = "droid";
 	else if (opts.copilot) aiEngine = "copilot";
-	else if (opts.ollama) aiEngine = "ollama";
+	else if (opts.gemini) aiEngine = "gemini";
 
 	// Determine model override (--sonnet is shortcut for --model sonnet)
 	const modelOverride = opts.sonnet ? "sonnet" : opts.model || undefined;
 
 	// Determine PRD source with auto-detection for file vs folder
-	let prdSource: "markdown" | "markdown-folder" | "yaml" | "github" = "markdown";
+	let prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github" =
+		"markdown";
 	let prdFile = opts.prd || "PRD.md";
 	let prdIsFolder = false;
 
-	if (opts.yaml) {
+	if (opts.json) {
+		prdSource = "json";
+		prdFile = opts.json;
+	} else if (opts.yaml) {
 		prdSource = "yaml";
 		prdFile = opts.yaml;
 	} else if (opts.github) {
@@ -118,6 +123,8 @@ export function parseArgs(args: string[]): {
 			if (stat.isDirectory()) {
 				prdSource = "markdown-folder";
 				prdIsFolder = true;
+			} else if (prdFile.toLowerCase().endsWith(".json")) {
+				prdSource = "json";
 			}
 		}
 	}
@@ -146,6 +153,7 @@ export function parseArgs(args: string[]): {
 		prdIsFolder,
 		githubRepo: opts.github || "",
 		githubLabel: opts.githubLabel || "",
+		syncIssue: opts.syncIssue ? (Number.parseInt(opts.syncIssue, 10) || undefined) : undefined,
 		autoCommit: opts.commit !== false,
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
 		modelOverride,

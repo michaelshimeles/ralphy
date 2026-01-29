@@ -32,7 +32,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	setVerbose(options.verbose);
 
 	// Validate PRD source
-	if (options.prdSource === "markdown" || options.prdSource === "yaml") {
+	if (options.prdSource === "markdown" || options.prdSource === "yaml" || options.prdSource === "json") {
 		if (!existsSync(options.prdFile)) {
 			logError(`${options.prdFile} not found in current directory`);
 			logInfo(`Create a ${options.prdFile} file with tasks`);
@@ -134,6 +134,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
+			syncIssue: options.syncIssue,
 		});
 	} else {
 		result = await runSequential({
@@ -157,6 +158,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
+			syncIssue: options.syncIssue,
 		});
 	}
 

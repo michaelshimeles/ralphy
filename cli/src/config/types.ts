@@ -92,7 +92,7 @@ export interface RuntimeOptions {
 	/** Maximum parallel agents */
 	maxParallel: number;
 	/** PRD source type */
-	prdSource: "markdown" | "markdown-folder" | "yaml" | "github";
+	prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github";
 	/** PRD file or folder path */
 	prdFile: string;
 	/** Whether PRD path is a folder */
@@ -101,6 +101,8 @@ export interface RuntimeOptions {
 	githubRepo: string;
 	/** GitHub issue label filter */
 	githubLabel: string;
+	/** GitHub issue number to sync PRD with on each iteration */
+	syncIssue?: number;
 	/** Auto-commit changes */
 	autoCommit: boolean;
 	/** Browser automation mode: 'auto' | 'true' | 'false' */

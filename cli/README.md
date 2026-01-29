@@ -111,6 +111,24 @@ Reads all `.md` files in the folder and aggregates tasks.
 ralphy --yaml tasks.yaml
 ```
 
+**JSON**:
+```bash
+ralphy --json PRD.json
+```
+```json
+{
+  "tasks": [
+    {
+      "title": "create auth",
+      "completed": false,
+      "parallel_group": 1,
+      "description": "Optional details"
+    }
+  ]
+}
+```
+Titles must be unique.
+
 **GitHub Issues**:
 ```bash
 ralphy --github owner/repo
@@ -175,6 +193,7 @@ When enabled (and agent-browser is installed), the AI can:
 |------|--------------|
 | `--prd PATH` | task file or folder (auto-detected, default: PRD.md) |
 | `--yaml FILE` | YAML task file |
+| `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
 | `--model NAME` | override model for any engine |

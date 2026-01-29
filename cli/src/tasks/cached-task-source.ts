@@ -1,5 +1,6 @@
 import { logError } from "../ui/logger.ts";
 import type { Task, TaskSource, TaskSourceType } from "./types.ts";
+import { JsonTaskSource } from "./json.ts";
 import { YamlTaskSource } from "./yaml.ts";
 
 interface CachedTaskSourceOptions {
@@ -55,6 +56,20 @@ export class CachedTaskSource implements TaskSource {
 		return this.inner instanceof YamlTaskSource;
 	}
 
+	/**
+	 * Check if the inner source is a JsonTaskSource
+	 */
+	isJsonSource(): boolean {
+		return this.inner instanceof JsonTaskSource;
+	}
+
+	/**
+	 * Check if the inner source supports parallel groups (YAML or JSON)
+	 */
+	supportsParallelGroups(): boolean {
+		return this.inner instanceof YamlTaskSource || this.inner instanceof JsonTaskSource;
+	}
+
 	async getAllTasks(): Promise<Task[]> {
 		if (!this.cachedTasks) {
 			this.cachedTasks = await this.inner.getAllTasks();
@@ -96,13 +111,16 @@ export class CachedTaskSource implements TaskSource {
 	}
 
 	/**
-	 * Get the parallel group of a task (YamlTaskSource only)
+	 * Get the parallel group of a task (YAML or JSON sources)
 	 */
 	async getParallelGroup(title: string): Promise<number> {
-		if (!(this.inner instanceof YamlTaskSource)) {
-			return 0;
+		if (this.inner instanceof YamlTaskSource) {
+			return this.inner.getParallelGroup(title);
 		}
-		return this.inner.getParallelGroup(title);
+		if (this.inner instanceof JsonTaskSource) {
+			return this.inner.getParallelGroup(title);
+		}
+		return 0;
 	}
 
 	/**
