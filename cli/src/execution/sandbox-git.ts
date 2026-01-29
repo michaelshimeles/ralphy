@@ -104,12 +104,23 @@ export async function commitSandboxChanges(
 				}
 			}
 
-			// Filter out files ignored by .gitignore to prevent "path is ignored" errors
-			const ignored = (await git.checkIgnore(modifiedFiles)) || [];
-			const filesToAdd = modifiedFiles.filter((f) => !ignored.includes(f));
+			// Catch-All: Stage EVERYTHING that is not ignored, but EXCLUDE progress log.
+			// File is at .ralphy/progress.txt, so we invoke pathspec to exclude it.
+			try {
+				await git.add([".", ":!.ralphy/progress.txt"]);
+			} catch (addErr) {
+				// Fallback if pathspec fails
+				logDebug(`Agent ${agentNum}: Smart add failed, falling back to standard add: ${addErr}`);
+				await git.add(".");
+				// Try to reset both possible locations
+				try { await git.reset([".ralphy/progress.txt"]); } catch {}
+			}
 
-			if (filesToAdd.length === 0) {
-				logDebug(`Agent ${agentNum}: No files to add (all were ignored)`);
+			// Check if we have anything to commit
+			const status = await git.status();
+			if (status.staged.length === 0) {
+				logDebug(`Agent ${agentNum}: No changes to commit after 'git add .'`);
+				await git.checkout(currentBranch);
 				return {
 					success: true,
 					branchName,
@@ -117,14 +128,11 @@ export async function commitSandboxChanges(
 				};
 			}
 
-			// Stage modified files
-			await git.add(filesToAdd);
-
 			// Commit
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
 			await git.commit(commitMessage);
 
-			logDebug(`Agent ${agentNum}: Committed ${filesToAdd.length} files to ${branchName}`);
+			logDebug(`Agent ${agentNum}: Committed ${status.staged.length} files to ${branchName}`);
 
 			// Return to original branch
 			await git.checkout(currentBranch);
@@ -132,7 +140,7 @@ export async function commitSandboxChanges(
 			return {
 				success: true,
 				branchName,
-				filesCommitted: filesToAdd.length,
+				filesCommitted: status.staged.length,
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
