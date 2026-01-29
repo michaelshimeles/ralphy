@@ -17,7 +17,7 @@ const isWindows = process.platform === "win32";
  * Uses local Ollama models through Claude Code's Anthropic-compatible API.
  * Requires Ollama running locally (default: http://localhost:11434)
  * 
- * Recommended models: glm-4.7-flash, glm-4.7, gpt-oss:20b, gpt-oss:120b
+ * Recommended models: gpt-oss:20b, glm-4.7, gpt-oss:20b, gpt-oss:120b
  * Note: Requires models with at least 64k context window
  */
 export class OllamaEngine extends BaseAIEngine {
@@ -28,7 +28,7 @@ export class OllamaEngine extends BaseAIEngine {
 		const args = ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"];
 		
 		// Default model for Ollama (can be overridden)
-		const model = options?.modelOverride || "glm-4.7-flash";
+		const model = options?.modelOverride || "gpt-oss:20b";
 		args.push("--model", model);
 
 		// Add any additional engine-specific arguments
@@ -106,7 +106,7 @@ export class OllamaEngine extends BaseAIEngine {
 		const args = ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"];
 		
 		// Default model for Ollama (can be overridden)
-		const model = options?.modelOverride || "glm-4.7-flash";
+		const model = options?.modelOverride || "gpt-oss:20b";
 		args.push("--model", model);
 
 		// Add any additional engine-specific arguments

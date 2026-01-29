@@ -12,9 +12,23 @@ export class OpenCodeEngine extends BaseAIEngine {
 
 	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
 		const args = ["run", "--format", "json"];
+		// If the user passed an Ollama model (eg. "ollama/gpt-oss:20b"), they probably
+		// intended to use the Ollama engine. Return a friendly error rather than
+		// forwarding that model name into OpenCode where it may route incorrectly.
+		if (options?.modelOverride && options.modelOverride.startsWith("ollama/")) {
+			return {
+				success: false,
+				response: "",
+				inputTokens: 0,
+				outputTokens: 0,
+				error: "Model names prefixed with 'ollama/' should be used with --ollama instead of --opencode. Try: --ollama --model gpt-oss:20b",
+			};
+		}
+
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
 		}
+
 		// Add any additional engine-specific arguments
 		if (options?.engineArgs && options.engineArgs.length > 0) {
 			args.push(...options.engineArgs);

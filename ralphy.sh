@@ -654,7 +654,7 @@ run_brownfield_task() {
       ANTHROPIC_API_KEY="" \
       ANTHROPIC_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}" \
       claude --dangerously-skip-permissions \
-        --model "${MODEL_OVERRIDE:-glm-4.7-flash}" \
+        --model "${MODEL_OVERRIDE:-gpt-oss:20b}" \
         -p "$prompt" 2>&1 | tee "$output_file"
       ;;
     codex)
