@@ -492,6 +492,8 @@ export async function runParallel(
 								// We pass the basename to matchesPattern() to support recursive filtering.
 								// This ensures patterns like "*.log" match "src/debug.log" anywhere in the tree,
 								// mimicking standard gitignore behavior for patterns without slashes.
+								// Note: Per git docs, patterns WITHOUT a leading slash match at ANY level.
+								// Only patterns WITH a slash (e.g. "/nul") would be root-anchored.
 								const baseName = normalized.split("/").pop() || "";
 								if (matchesPattern(baseName, pattern, false)) {
 									logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);

@@ -143,6 +143,8 @@ export async function commitSandboxChanges(
 					}
 				}
 
+				// Exclude files already staged in Phase 1 - not to prevent double-staging
+				// (git handles that gracefully), but for accurate logging of "additional" files
 				if (!isInfra && !modifiedFiles.includes(file)) {
 					additionalFiles.push(file);
 				}
