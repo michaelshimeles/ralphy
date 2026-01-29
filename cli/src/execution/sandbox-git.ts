@@ -40,14 +40,14 @@ function generateUniqueId(): string {
 }
 
 /** Safe git add: batches files (avoids ENAMETOOLONG) and filters ignored files */
-async function safeGitAdd(git: SimpleGit, files: string[]): Promise<number> {
+async function safeGitAdd(git: SimpleGit, files: string[], batchSize = 20): Promise<number> {
 	if (!files?.length) return 0;
 
 	// Filter out ignored files first
 	const ignoredSet = new Set<string>();
-	for (let i = 0; i < files.length; i += 50) {
+	for (let i = 0; i < files.length; i += batchSize) {
 		try {
-			const result = await git.checkIgnore(files.slice(i, i + 50));
+			const result = await git.checkIgnore(files.slice(i, i + batchSize));
 			result.forEach((f) => ignoredSet.add(f.replace(/\\/g, "/")));
 		} catch { /* check-ignore exits 1 if nothing ignored */ }
 	}
@@ -58,8 +58,8 @@ async function safeGitAdd(git: SimpleGit, files: string[]): Promise<number> {
 	if (!filtered.length) return 0;
 
 	// Add in batches with retry for lock contention
-	for (let i = 0; i < filtered.length; i += 50) {
-		const batch = filtered.slice(i, i + 50);
+	for (let i = 0; i < filtered.length; i += batchSize) {
+		const batch = filtered.slice(i, i + batchSize);
 		for (let attempt = 1; attempt <= 3; attempt++) {
 			try {
 				await git.add(batch);
