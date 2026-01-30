@@ -136,7 +136,7 @@ export async function execCommand(
 			resolve({
 				stdout: stdout.trim(),
 				stderr: stderr.trim(),
-				exitCode: exitCode || 0,
+				exitCode: exitCode ?? 1,
 			});
 		});
 	});

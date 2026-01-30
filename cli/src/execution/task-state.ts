@@ -377,7 +377,7 @@ export class TaskStateManager {
 					// SECURITY: Parse JSON safely and check for prototype pollution
 					data = JSON.parse(content) as StateFileFormat;
 					// Validate no prototype pollution keys
-					if (JSON.stringify(data).match(/"__(proto|constructor|prototype)"__/)) {
+					if (JSON.stringify(data).match(/"(__proto__|constructor|prototype)"\s*:/g)) {
 						throw new Error("State file contains potentially malicious prototype pollution keys");
 					}
 					break;
@@ -404,21 +404,82 @@ export class TaskStateManager {
 	}
 
 	/**
+	 * Escape a CSV field to handle commas, quotes, and newlines.
+	 */
+	private escapeCSVField(field: string): string {
+		// If field contains comma, quote, or newline, wrap in quotes and escape existing quotes
+		if (/[",\n\r]/.test(field)) {
+			return `"${field.replace(/"/g, '""')}"`;
+		}
+		return field;
+	}
+
+	/**
 	 * Convert state to CSV format.
 	 */
 	private toCSV(data: StateFileFormat): string {
 		const headers = ["key", "id", "title", "state", "attemptCount", "lastAttemptTime", "errorHistory"];
 		const rows = Object.entries(data.tasks).map(([key, task]) => [
-			key,
-			task.id,
-			task.title,
-			task.state,
-			task.attemptCount,
-			task.lastAttemptTime ?? "",
-			task.errorHistory.join("|"),
+			this.escapeCSVField(key),
+			this.escapeCSVField(task.id),
+			this.escapeCSVField(task.title),
+			this.escapeCSVField(task.state),
+			this.escapeCSVField(String(task.attemptCount)),
+			this.escapeCSVField(task.lastAttemptTime ? String(task.lastAttemptTime) : ""),
+			this.escapeCSVField(task.errorHistory.join("|")),
 		]);
 
 		return [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+	}
+
+	/**
+	 * Parse a CSV line respecting quoted fields.
+	 */
+	private parseCSVLine(line: string): string[] {
+		const result: string[] = [];
+		let current = "";
+		let inQuotes = false;
+		let i = 0;
+
+		while (i < line.length) {
+			const char = line[i];
+			const nextChar = line[i + 1];
+
+			if (inQuotes) {
+				if (char === '"') {
+					if (nextChar === '"') {
+						// Escaped quote
+						current += '"';
+						i += 2;
+					} else {
+						// End of quoted field
+						inQuotes = false;
+						i++;
+					}
+				} else {
+					current += char;
+					i++;
+				}
+			} else {
+				if (char === '"') {
+					// Start of quoted field
+					inQuotes = true;
+					i++;
+				} else if (char === ',') {
+					// End of field
+					result.push(current);
+					current = "";
+					i++;
+				} else {
+					current += char;
+					i++;
+				}
+			}
+		}
+
+		// Don't forget the last field
+		result.push(current);
+		return result;
 	}
 
 	/**
@@ -432,7 +493,7 @@ export class TaskStateManager {
 
 		const tasks: Record<string, TaskStateEntry> = {};
 		for (let i = 1; i < lines.length; i++) {
-			const parts = lines[i].split(",");
+			const parts = this.parseCSVLine(lines[i]);
 			if (parts.length >= 7) {
 				const [key, id, title, state, attemptCount, lastAttemptTime, errorHistory] = parts;
 				tasks[key] = {

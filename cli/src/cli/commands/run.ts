@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { loadConfig } from "../../config/loader.ts";
 import type { RuntimeOptions } from "../../config/types.ts";
 import { createEngine, isEngineAvailable } from "../../engines/index.ts";
@@ -30,9 +30,12 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	// Infer workDir from PRD file path if specified
 	let workDir = process.cwd();
 
-	// Check if prdFile is an absolute path and infer workDir from it
-	if (options.prdFile && isAbsolute(options.prdFile)) {
-		workDir = dirname(options.prdFile);
+	// Infer workDir from PRD file - resolve relative paths against cwd first
+	if (options.prdFile) {
+		const prdPath = isAbsolute(options.prdFile)
+			? options.prdFile
+			: resolve(process.cwd(), options.prdFile);
+		workDir = dirname(prdPath);
 		// Check if workDir exists, if not fall back to cwd
 		try {
 			statSync(workDir);

@@ -211,17 +211,21 @@ export function acquireFileLock(filePath: string, workDir: string, maxRetries = 
 				const delay = Math.min(baseDelay + jitter, 5000); // Max 5 seconds
 
 				logDebug(`Lock acquisition attempt ${attempt}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`);
-				// Use setTimeout with blocking pattern (Atomics.wait for Bun/Node compatibility)
-				// This yields to the event loop instead of busy-waiting
-				if (typeof Bun !== "undefined" && Bun.sleepSync) {
-					Bun.sleepSync(delay);
-				} else {
-					// For Node.js, use a lighter busy-wait with occasional yielding
+				// Use sync sleep that doesn't pin CPU
+				// execSync("sleep 0.x") is portable and yields CPU unlike busy-wait
+				try {
+					const { execSync } = require("child_process");
+					// Use ping for sub-second precision on Windows, sleep on Unix
+					if (process.platform === "win32") {
+						execSync(`ping -n ${Math.ceil(delay / 1000) || 1} 127.0.0.1 >nul`);
+					} else {
+						execSync(`sleep ${delay / 1000}`);
+					}
+				} catch {
+					// Last resort: minimal busy-wait to avoid CPU pinning
 					const start = Date.now();
 					while (Date.now() - start < delay) {
-						// Minimal work to allow event loop processing
-						if (Date.now() % 10 === 0) {
-						}
+						// Just check time, no nested loops
 					}
 				}
 			}
