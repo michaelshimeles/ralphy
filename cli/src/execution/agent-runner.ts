@@ -247,16 +247,30 @@ async function runAgent(targetDir: string, options: AgentRunnerOptions): Promise
 	}
 
 	// Execute with retry
-	const engineOptions = {
-		...(effectiveModel && { modelOverride: effectiveModel }),
-		...(engineArgs && engineArgs.length > 0 && { engineArgs }),
-		...(options.env && { env: options.env }),
-		...(options.debugOpenCode && { debugOpenCode: options.debugOpenCode }),
-		// Default to true for autonomous operation - only disable if explicitly set to false
+	// Build engine options with strict validation
+	const engineOptions: Record<string, unknown> = {
 		allowOpenCodeSandboxAccess: options.allowOpenCodeSandboxAccess !== false,
-		...(options.logThoughts !== undefined && { logThoughts: options.logThoughts }),
-		...(options.dryRun && { dryRun: options.dryRun }),
 	};
+
+	// Only add defined, non-empty values
+	if (effectiveModel && typeof effectiveModel === "string") {
+		engineOptions.modelOverride = effectiveModel;
+	}
+	if (Array.isArray(engineArgs) && engineArgs.length > 0) {
+		engineOptions.engineArgs = engineArgs.filter((arg): arg is string => typeof arg === "string");
+	}
+	if (options.env && typeof options.env === "object") {
+		engineOptions.env = options.env;
+	}
+	if (options.debugOpenCode) {
+		engineOptions.debugOpenCode = true;
+	}
+	if (options.logThoughts === true || options.logThoughts === false) {
+		engineOptions.logThoughts = options.logThoughts;
+	}
+	if (options.dryRun) {
+		engineOptions.dryRun = true;
+	}
 
 	const result = await withRetry(
 		async () => {

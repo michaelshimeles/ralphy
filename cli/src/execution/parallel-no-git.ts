@@ -155,14 +155,17 @@ export async function runParallelNoGit(
 			}
 
 			// Initialize agent progress map for static display
+			// Create a map to ensure consistent agent numbers between display and execution
+			const taskAgentMap = new Map<string, number>();
 			for (const task of batch) {
 				const agentNum = getNextAgentNum();
+				taskAgentMap.set(task.id, agentNum);
 				staticAgentDisplay.setAgentStatus(agentNum, task.title, "working");
 			}
 
 			// Parallel execution with progress callback
 			const promises = batch.map((task) => {
-				const agentNum = globalAgentNum - (batch.length - batch.indexOf(task) - 1);
+				const agentNum = taskAgentMap.get(task.id)!;
 				const agentOptions: AgentRunnerOptions = {
 					engine,
 					task,

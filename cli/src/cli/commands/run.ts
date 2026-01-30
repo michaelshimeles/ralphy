@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { loadConfig } from "../../config/loader.ts";
 import type { RuntimeOptions } from "../../config/types.ts";
 import { createEngine, isEngineAvailable } from "../../engines/index.ts";
@@ -27,22 +27,9 @@ import { registerCleanup } from "../../utils/cleanup.ts";
  * Run the PRD loop (multiple tasks from file/GitHub)
  */
 export async function runLoop(options: RuntimeOptions): Promise<void> {
-	// Infer workDir from PRD file path if specified
-	let workDir = process.cwd();
-
-	// Infer workDir from PRD file - resolve relative paths against cwd first
-	if (options.prdFile) {
-		const prdPath = isAbsolute(options.prdFile)
-			? options.prdFile
-			: resolve(process.cwd(), options.prdFile);
-		workDir = dirname(prdPath);
-		// Check if workDir exists, if not fall back to cwd
-		try {
-			statSync(workDir);
-		} catch (_error) {
-			workDir = process.cwd();
-		}
-	}
+	// Keep workDir as cwd - don't change based on prdFile location
+	// This preserves relative path behavior expected by task code
+	const workDir = process.cwd();
 
 	const startTime = Date.now();
 	const config = loadConfig(workDir);

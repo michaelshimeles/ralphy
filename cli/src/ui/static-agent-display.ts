@@ -11,7 +11,10 @@ export class StaticAgentDisplay {
 	private lastLinesCount = 0;
 
 	constructor() {
-		StaticAgentDisplay.instance = this;
+		// Only set singleton if not already set (prevents overwrite)
+		if (!StaticAgentDisplay.instance) {
+			StaticAgentDisplay.instance = this;
+		}
 	}
 
 	/**
@@ -25,6 +28,12 @@ export class StaticAgentDisplay {
 	 * Log a message safely to the terminal while the display is active
 	 */
 	log(message: string): void {
+		// Skip ANSI codes if not a TTY (e.g., piped output)
+		if (!process.stdout.isTTY) {
+			console.log(message);
+			return;
+		}
+
 		// Clear previous lines to print above
 		if (this.lastLinesCount > 0) {
 			process.stdout.write(`\x1b[${this.lastLinesCount}A`);
@@ -127,6 +136,11 @@ export class StaticAgentDisplay {
 	 * Display static agent rows (called periodically)
 	 */
 	private display(): void {
+		// Skip ANSI display if not a TTY (e.g., piped output)
+		if (!process.stdout.isTTY) {
+			return;
+		}
+
 		const agents = Array.from(this.agentProgressMap.values());
 		const now = Date.now();
 		const output = this.buildDisplay(agents, now);

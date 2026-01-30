@@ -244,14 +244,6 @@ export async function runParallel(
 				continue;
 			}
 
-			// Initialize agent progress map for static display
-			for (const task of batch) {
-				const agentNum = getNextAgentNum();
-				const initialPhase = planningModel ? "planning" : "execution";
-				const initialModel = planningModel ? "planning" : "main";
-				staticAgentDisplay.setAgentStatus(agentNum, task.title, "working", initialPhase, initialModel);
-			}
-
 			// Claim tasks for execution before starting
 			const claimedTasks: Task[] = [];
 			for (const task of batch) {
@@ -268,9 +260,20 @@ export async function runParallel(
 				continue;
 			}
 
+			// Initialize agent progress map for static display AFTER claiming
+			// to ensure agent numbers match between display and execution
+			const taskAgentMap = new Map<string, number>();
+			for (const task of claimedTasks) {
+				const agentNum = getNextAgentNum();
+				taskAgentMap.set(task.id, agentNum);
+				const initialPhase = planningModel ? "planning" : "execution";
+				const initialModel = planningModel ? "planning" : "main";
+				staticAgentDisplay.setAgentStatus(agentNum, task.title, "working", initialPhase, initialModel);
+			}
+
 			// Parallel execution
 			const promises = claimedTasks.map((task) => {
-				const agentNum = globalAgentNum - (claimedTasks.length - claimedTasks.indexOf(task) - 1);
+				const agentNum = taskAgentMap.get(task.id)!;
 				const agentOptions: AgentRunnerOptions = {
 					engine,
 					task,
@@ -341,16 +344,12 @@ export async function runParallel(
 					result.tasksFailed++;
 					notifyTaskFailed(task.title, String(error));
 
-					// Check if failure is planning-related
+					// Check if failure is planning-related - still need to mark complete
 					if (isPlanningRejection(error)) {
-						// Planning phase failed - transition to failed state but don't mark complete
-						logDebug(`Planning phase failed for task "${task.title}", transitioning to FAILED state`);
-						await taskStateManager.transitionState(task.id, TaskState.FAILED, String(error));
-						clearDeferredTask(taskSource.type, task, workDir, prdFile);
-						continue;
+						logDebug(`Planning phase failed for task "${task.title}"`);
 					}
 
-					// Execution phase failure - transition to failed state
+					// All failures transition to failed state and mark complete
 					await taskStateManager.transitionState(task.id, TaskState.FAILED, String(error));
 					await taskSource.markComplete(task.id);
 					clearDeferredTask(taskSource.type, task, workDir, prdFile);

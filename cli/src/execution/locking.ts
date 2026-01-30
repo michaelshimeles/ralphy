@@ -73,12 +73,26 @@ function cleanupStaleLockFiles(workDir: string): void {
 		const filePath = join(lockDir, file);
 		try {
 			const content = readFileSync(filePath, "utf8");
+			// Only delete if file is truly empty (not just read error)
+			if (!content || content.trim().length === 0) {
+				unlinkSync(filePath);
+				continue;
+			}
 			const lockInfo: LockInfo = JSON.parse(content);
 			if (now - lockInfo.timestamp >= lockInfo.timeout) {
 				unlinkSync(filePath);
 			}
 		} catch {
-			unlinkSync(filePath);
+			// Only delete if file is empty/corrupt AND older than 5 minutes
+			// to avoid race conditions with active locks
+			try {
+				const stats = readFileSync(filePath, "utf8");
+				if (!stats || stats.trim().length === 0) {
+					unlinkSync(filePath);
+				}
+			} catch {
+				// File may have been removed by another process, ignore
+			}
 		}
 	}
 }
@@ -207,7 +221,7 @@ export function acquireFileLock(filePath: string, workDir: string, maxRetries = 
 			if (attempt < maxRetries) {
 				const baseDelay = 2 ** attempt * 100; // 100, 200, 400, 800, 1600ms
 				// Use cryptographically secure random for jitter (not Math.random())
-				const jitter = Number.parseInt(randomBytes(2).toString("hex"), 16) % 50; // 0-50ms jitter
+				const jitter = randomBytes(1)[0] % 50; // Single byte 0-255, uniform distribution for 0-49
 				const delay = Math.min(baseDelay + jitter, 5000); // Max 5 seconds
 
 				logDebug(`Lock acquisition attempt ${attempt}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`);
@@ -222,10 +236,17 @@ export function acquireFileLock(filePath: string, workDir: string, maxRetries = 
 						execSync(`sleep ${delay / 1000}`);
 					}
 				} catch {
-					// Last resort: minimal busy-wait to avoid CPU pinning
-					const start = Date.now();
-					while (Date.now() - start < delay) {
-						// Just check time, no nested loops
+					// Fallback: use Atomics.wait for efficient sleeping without busy-wait
+					try {
+						const buffer = new SharedArrayBuffer(4);
+						const view = new Int32Array(buffer);
+						Atomics.wait(view, 0, 0, delay);
+					} catch {
+						// Truly last resort: minimal busy-wait
+						const start = Date.now();
+						while (Date.now() - start < delay) {
+							// Just check time
+						}
 					}
 				}
 			}
