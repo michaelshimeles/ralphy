@@ -1,4 +1,5 @@
 import simpleGit, { type SimpleGit } from "simple-git";
+import { logWarn } from "../ui/logger.ts";
 
 /**
  * Result of a merge operation
@@ -16,6 +17,19 @@ function parseGitFileList(output: string): string[] {
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line.length > 0);
+}
+
+/**
+ * Check if a merge is currently in progress
+ */
+export async function isMergeInProgress(workDir: string): Promise<boolean> {
+	const git: SimpleGit = simpleGit(workDir);
+	try {
+		await git.raw(["rev-parse", "--verify", "MERGE_HEAD"]);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function getPotentialConflictFiles(
@@ -110,15 +124,15 @@ export async function createIntegrationBranch(
 	// Checkout base branch first
 	await git.checkout(baseBranch);
 
-	// Delete the branch if it exists
-	try {
-		await git.deleteLocalBranch(branchName, true);
-	} catch {
-		// Branch might not exist
-	}
-
-	// Create new branch from base
+	// Create and checkout new branch from base
 	await git.checkoutLocalBranch(branchName);
+
+	// Set up tracking if remote exists
+	const remotes = await git.getRemotes();
+	if (remotes.some((r) => r.name === "origin")) {
+		// Just locally is fine for now, parallel agents work in local worktrees
+		// Pushing happens later if needed
+	}
 
 	return branchName;
 }
@@ -167,9 +181,14 @@ export async function getConflictedFiles(workDir: string): Promise<string[]> {
 export async function abortMerge(workDir: string): Promise<void> {
 	const git: SimpleGit = simpleGit(workDir);
 	try {
-		await git.merge(["--abort"]);
-	} catch {
-		// Ignore if no merge in progress
+		// Only abort if merge is actually in progress
+		if (await isMergeInProgress(workDir)) {
+			await git.merge(["--abort"]);
+		}
+	} catch (error) {
+		// Log error but don't throw - abort is best effort
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		logWarn(`Failed to abort merge: ${errorMessage}`);
 	}
 }
 
@@ -217,16 +236,6 @@ export async function completeMerge(workDir: string, resolvedFiles: string[]): P
 }
 
 /**
- * Check if a merge is currently in progress
- */
-export async function isMergeInProgress(workDir: string): Promise<boolean> {
-	const git: SimpleGit = simpleGit(workDir);
-	const status = await git.status();
-	// If we have conflicted files or are in a merge state
-	return status.conflicted.length > 0 || status.current?.includes("MERGING") || false;
-}
-
-/**
  * Check if a branch exists locally
  */
 export async function branchExists(branchName: string, workDir: string): Promise<boolean> {
@@ -257,8 +266,8 @@ export async function analyzePreMerge(
 
 	try {
 		// Get list of files that differ between the branch and target
-		// Using three-dot notation to show changes since the branches diverged
-		const diffOutput = await git.diff([`${targetBranch}...${branch}`, "--name-only"]);
+		// Using two-dot notation to show unique changes to target (excluding ancestor commits)
+		const diffOutput = await git.diff([`${targetBranch}..${branch}`, "--name-only"]);
 		const filesChanged = diffOutput
 			.split("\n")
 			.map((f) => f.trim())

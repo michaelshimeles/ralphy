@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { detectProject } from "./detector.ts";
 import { getConfigPath, getProgressPath, getRalphyDir } from "./loader.ts";
@@ -35,7 +34,7 @@ rules:
   # - "Use server actions instead of API routes in Next.js"
   #
   # Skills/playbooks (optional):
-  # - "Before coding, read and follow any relevant skill/playbook docs under .opencode/skills, .claude/skills, or .github/skills."
+  # - "Before coding, read and follow any relevant skill/playbook docs under .opencode/skills or .claude/skills."
 
 # Boundaries - files/folders the AI should not modify
 boundaries:
@@ -108,44 +107,8 @@ export function addRule(rule: string, workDir = process.cwd()): void {
 	writeFileSync(configPath, YAML.stringify(parsed), "utf-8");
 }
 
-/** Queue for batching progress writes */
-const progressWriteQueue: Map<string, string[]> = new Map();
-let flushTimeout: ReturnType<typeof setTimeout> | null = null;
-
 /**
- * Flush all pending progress writes to disk
- */
-async function flushProgressWrites(): Promise<void> {
-	if (progressWriteQueue.size === 0) return;
-
-	const entries = [...progressWriteQueue.entries()];
-	progressWriteQueue.clear();
-	flushTimeout = null;
-
-	for (const [path, lines] of entries) {
-		try {
-			await appendFile(path, lines.join(""), "utf-8");
-		} catch {
-			// Ignore write errors for progress logging
-		}
-	}
-}
-
-/**
- * Schedule a flush of progress writes (debounced)
- */
-function scheduleFlush(): void {
-	if (flushTimeout) return;
-	flushTimeout = setTimeout(() => {
-		void flushProgressWrites();
-	}, 100); // Batch writes within 100ms window
-}
-
-/**
- * Log a task to the progress file (async, batched)
- *
- * Performance optimized: uses async I/O and batches writes within 100ms windows
- * to reduce file system contention in parallel mode.
+ * Log a task to the progress file
  */
 export function logTaskProgress(
 	task: string,
@@ -162,23 +125,5 @@ export function logTaskProgress(
 	const icon = status === "completed" ? "✓" : "✗";
 	const line = `- [${icon}] ${timestamp} - ${task}\n`;
 
-	// Add to write queue
-	const existing = progressWriteQueue.get(progressPath) || [];
-	existing.push(line);
-	progressWriteQueue.set(progressPath, existing);
-
-	// Schedule async flush
-	scheduleFlush();
-}
-
-/**
- * Force flush all pending progress writes immediately
- * Call this before process exit to ensure all writes are persisted
- */
-export async function flushAllProgressWrites(): Promise<void> {
-	if (flushTimeout) {
-		clearTimeout(flushTimeout);
-		flushTimeout = null;
-	}
-	await flushProgressWrites();
+	appendFileSync(progressPath, line, "utf-8");
 }

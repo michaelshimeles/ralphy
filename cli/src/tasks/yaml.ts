@@ -42,7 +42,7 @@ export class YamlTaskSource implements TaskSource {
 		const data = this.readFile();
 		return (data.tasks || [])
 			.filter((t) => !t.completed)
-			.map((t, i) => ({
+			.map((t, _i) => ({
 				id: t.title, // Use title as ID for YAML tasks
 				title: t.title,
 				body: t.description,

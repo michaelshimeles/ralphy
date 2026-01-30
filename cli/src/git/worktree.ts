@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
@@ -6,18 +7,13 @@ import { slugify } from "./branch.ts";
 
 /**
  * Generate a unique identifier for branch names
- * Combines timestamp with random suffix to prevent collisions
  */
 function generateUniqueId(): string {
-	const timestamp = Date.now();
-	const random = Math.random().toString(36).substring(2, 8);
-	return `${timestamp}-${random}`;
+	return randomUUID();
 }
 
 /**
  * Create a worktree for parallel agent execution
- *
- * Performance optimized: only prunes once, and only if cleanup is needed.
  */
 export async function createAgentWorktree(
 	taskName: string,
@@ -32,11 +28,13 @@ export async function createAgentWorktree(
 
 	const git: SimpleGit = simpleGit(originalDir);
 
+	// Prune stale worktrees first
+	await git.raw(["worktree", "prune"]);
+
 	// Remove existing worktree dir if any (from previous failed runs)
-	// Only prune if we actually remove something
 	if (existsSync(worktreeDir)) {
 		rmSync(worktreeDir, { recursive: true, force: true });
-		// Prune stale worktrees after removing directory
+		// Prune again after removing directory
 		await git.raw(["worktree", "prune"]);
 	}
 
@@ -60,7 +58,15 @@ export async function cleanupAgentWorktree(
 		const worktreeGit = simpleGit(worktreeDir);
 		const status = await worktreeGit.status();
 
-		if (status.files.length > 0) {
+		// Check all types of changes: staged, modified, new files, deleted, untracked
+		const hasChanges =
+			status.staged.length > 0 ||
+			status.files.length > 0 ||
+			status.created.length > 0 ||
+			status.deleted.length > 0 ||
+			status.not_added.length > 0;
+
+		if (hasChanges) {
 			// Leave worktree in place due to uncommitted changes
 			return { leftInPlace: true };
 		}

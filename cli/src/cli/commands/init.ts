@@ -1,7 +1,7 @@
 import pc from "picocolors";
 import { isInitialized } from "../../config/loader.ts";
 import { initConfig } from "../../config/writer.ts";
-import { logSuccess, logWarn } from "../../ui/logger.ts";
+import { logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
 
 /**
  * Handle --init command
@@ -13,7 +13,7 @@ export async function runInit(workDir = process.cwd()): Promise<void> {
 
 		// In a real CLI, we'd prompt the user
 		// For now, just warn and return
-		console.log("To overwrite, delete .ralphy/ and run again");
+		logWarn("To overwrite, delete .ralphy/ and run again");
 		return;
 	}
 
@@ -21,25 +21,25 @@ export async function runInit(workDir = process.cwd()): Promise<void> {
 	const { detected } = initConfig(workDir);
 
 	// Show what we detected
-	console.log("");
-	console.log(pc.bold("Detected:"));
-	console.log(`  Project:   ${pc.cyan(detected.name)}`);
-	if (detected.language) console.log(`  Language:  ${pc.cyan(detected.language)}`);
-	if (detected.framework) console.log(`  Framework: ${pc.cyan(detected.framework)}`);
-	if (detected.testCmd) console.log(`  Test:      ${pc.cyan(detected.testCmd)}`);
-	if (detected.lintCmd) console.log(`  Lint:      ${pc.cyan(detected.lintCmd)}`);
-	if (detected.buildCmd) console.log(`  Build:     ${pc.cyan(detected.buildCmd)}`);
-	console.log("");
+	logInfo("");
+	logInfo(pc.bold("Detected:"));
+	logInfo(`  Project:   ${pc.cyan(detected.name)}`);
+	if (detected.language) logInfo(`  Language:  ${pc.cyan(detected.language)}`);
+	if (detected.framework) logInfo(`  Framework: ${pc.cyan(detected.framework)}`);
+	if (detected.testCmd) logInfo(`  Test:      ${pc.cyan(detected.testCmd)}`);
+	if (detected.lintCmd) logInfo(`  Lint:      ${pc.cyan(detected.lintCmd)}`);
+	if (detected.buildCmd) logInfo(`  Build:     ${pc.cyan(detected.buildCmd)}`);
+	logInfo("");
 
 	logSuccess("Created .ralphy/");
-	console.log("");
-	console.log(`  ${pc.cyan(".ralphy/config.yaml")}   - Your rules and preferences`);
-	console.log(`  ${pc.cyan(".ralphy/progress.txt")} - Progress log (auto-updated)`);
-	console.log("");
-	console.log(pc.bold("Next steps:"));
-	console.log(`  1. Add rules:  ${pc.cyan('ralphy --add-rule "your rule here"')}`);
-	console.log(`  2. Or edit:    ${pc.cyan(".ralphy/config.yaml")}`);
-	console.log(
+	logInfo("");
+	logInfo(`  ${pc.cyan(".ralphy/config.yaml")}   - Your rules and preferences`);
+	logInfo(`  ${pc.cyan(".ralphy/progress.txt")} - Progress log (auto-updated)`);
+	logInfo("");
+	logInfo(pc.bold("Next steps:"));
+	logInfo(`  1. Add rules:  ${pc.cyan('ralphy --add-rule "your rule here"')}`);
+	logInfo(`  2. Or edit:    ${pc.cyan(".ralphy/config.yaml")}`);
+	logInfo(
 		`  3. Run:        ${pc.cyan('ralphy "your task"')} or ${pc.cyan("ralphy")} (with PRD.md)`,
 	);
 }

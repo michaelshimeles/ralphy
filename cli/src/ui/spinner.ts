@@ -1,25 +1,11 @@
 import { createSpinner } from "nanospinner";
 import pc from "picocolors";
-import { formatDuration } from "./logger.ts";
+import { logError, logInfo } from "./logger.ts";
 
 export type SpinnerInstance = ReturnType<typeof createSpinner>;
 
 /**
- * Operation timing entry for tracking step durations
- */
-interface OperationTiming {
-	name: string;
-	startTime: number;
-	endTime?: number;
-}
-
-/**
- * Progress spinner with step tracking and operation timing
- *
- * Features:
- * - Shows current step with elapsed time
- * - Tracks step transitions for performance visibility
- * - Optional operation timing breakdown in success message
+ * Progress spinner with step tracking
  */
 export class ProgressSpinner {
 	private spinner: SpinnerInstance;
@@ -28,58 +14,112 @@ export class ProgressSpinner {
 	private task: string;
 	private settings: string;
 	private tickInterval: ReturnType<typeof setInterval> | null = null;
-	private stepHistory: OperationTiming[] = [];
-	private stepStartTime: number;
+	private lastUpdate = 0;
+	private readonly UPDATE_THROTTLE = 50; // Minimum 50ms between updates (very responsive)
+	private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+	private heartbeatCount = 0;
 
 	constructor(task: string, settings?: string[]) {
 		this.task = task.length > 40 ? `${task.slice(0, 37)}...` : task;
 		this.settings = settings?.length ? `[${settings.join(", ")}]` : "";
 		this.startTime = Date.now();
-		this.stepStartTime = Date.now();
-		this.spinner = createSpinner(this.formatText()).start();
 
-		// Record initial step
-		this.stepHistory.push({ name: this.currentStep, startTime: this.stepStartTime });
+		try {
+			this.spinner = createSpinner(this.formatText()).start();
+		} catch (_error) {
+			// Fallback: If nanospinner fails, create a simple object that won't crash
+			logError("Warning: Spinner initialization failed, using fallback mode");
+			this.spinner = {
+				// biome-ignore lint/suspicious/noExplicitAny: Generic fallback options
+				success: (opts: any) => logInfo(opts?.text || "Done"),
+				// biome-ignore lint/suspicious/noExplicitAny: Generic fallback options
+				error: (opts: any) => logError(opts?.text || "Error"),
+				update: () => {},
+				stop: () => {},
+			} as unknown as SpinnerInstance;
+			logInfo(`Started: ${this.formatText()}`);
+		}
 
 		// Update timer every second
-		this.tickInterval = setInterval(() => this.tick(), 1000);
+		try {
+			this.tickInterval = setInterval(() => this.tick(), 1000);
+		} catch (_error) {
+			logError(`Warning: Timer initialization failed, spinner won't auto-update`);
+			this.tickInterval = null;
+		}
+
+		// Add heartbeat to keep spinner alive even when no output
+		try {
+			this.heartbeatInterval = setInterval(() => {
+				this.heartbeatCount++;
+				// Force a tick every 5 seconds to show we're still alive
+				if (this.heartbeatCount % 5 === 0) {
+					this.tick();
+				}
+			}, 1000);
+		} catch (_error) {
+			logError("Warning: Heartbeat initialization failed");
+			this.heartbeatInterval = null;
+		}
+
+		// Force immediate tick to ensure spinner is visible
+		this.tick();
 	}
 
 	private formatText(): string {
 		const elapsed = Date.now() - this.startTime;
-		const time = formatDuration(elapsed);
+		const secs = Math.floor(elapsed / 1000);
+		const mins = Math.floor(secs / 60);
+		const remainingSecs = secs % 60;
+		const time = mins > 0 ? `${mins}m ${remainingSecs}s` : `${secs}s`;
 
 		const settingsStr = this.settings ? ` ${pc.yellow(this.settings)}` : "";
 		return `${pc.cyan(this.currentStep)}${settingsStr} ${pc.dim(`[${time}]`)} ${this.task}`;
 	}
 
 	/**
-	 * Update the current step and record timing
+	 * Update the current step
 	 */
 	updateStep(step: string): void {
+		this.currentStep = step;
 		const now = Date.now();
 
-		// Close out previous step timing
-		if (this.stepHistory.length > 0) {
-			const lastStep = this.stepHistory[this.stepHistory.length - 1];
-			if (!lastStep.endTime) {
-				lastStep.endTime = now;
-			}
+		// Throttle updates to prevent overwhelming the spinner
+		if (now - this.lastUpdate < this.UPDATE_THROTTLE) {
+			return;
 		}
 
-		// Record new step
-		this.currentStep = step;
-		this.stepStartTime = now;
-		this.stepHistory.push({ name: step, startTime: now });
-
-		this.spinner.update({ text: this.formatText() });
+		this.lastUpdate = now;
+		try {
+			this.spinner.update({ text: this.formatText() });
+		} catch (_error) {
+			// Fallback: Just log the progress if spinner update fails
+			logInfo(`[${this.formatText()}]`);
+		}
 	}
 
 	/**
 	 * Update spinner text (called periodically to update time)
 	 */
 	tick(): void {
-		this.spinner.update({ text: this.formatText() });
+		if (!this.tickInterval) {
+			// Don't update if spinner is stopped
+			return;
+		}
+
+		try {
+			// Always update the timer, bypassing throttle
+			this.spinner.update({ text: this.formatText() });
+
+			// Force output flush on Windows to prevent blocking
+			if (process.platform === "win32") {
+				// This helps prevent "stuck" appearance on Windows terminals
+				process.stdout.write?.("");
+			}
+		} catch (_error) {
+			// Fallback: Just log the progress if spinner update fails
+			logInfo(`[${this.formatText()}]`);
+		}
 	}
 
 	private clearTickInterval(): void {
@@ -87,46 +127,18 @@ export class ProgressSpinner {
 			clearInterval(this.tickInterval);
 			this.tickInterval = null;
 		}
-	}
-
-	/**
-	 * Get total elapsed time in milliseconds
-	 */
-	getElapsedMs(): number {
-		return Date.now() - this.startTime;
-	}
-
-	/**
-	 * Get step timing breakdown
-	 */
-	getStepTimings(): Array<{ name: string; durationMs: number }> {
-		const now = Date.now();
-		return this.stepHistory.map((step) => ({
-			name: step.name,
-			durationMs: (step.endTime || now) - step.startTime,
-		}));
-	}
-
-	/**
-	 * Mark as success with optional timing breakdown
-	 */
-	success(message?: string, showTimingBreakdown = false): void {
-		this.clearTickInterval();
-		const elapsed = formatDuration(this.getElapsedMs());
-
-		let text = message || this.formatText();
-
-		if (showTimingBreakdown && this.stepHistory.length > 1) {
-			const timings = this.getStepTimings()
-				.filter((t) => t.durationMs >= 1000) // Only show steps that took >= 1s
-				.map((t) => `${t.name}: ${formatDuration(t.durationMs)}`)
-				.join(", ");
-			if (timings) {
-				text = `${text} ${pc.dim(`(${timings})`)}`;
-			}
+		if (this.heartbeatInterval) {
+			clearInterval(this.heartbeatInterval);
+			this.heartbeatInterval = null;
 		}
+	}
 
-		this.spinner.success({ text: `${text} ${pc.green(`[${elapsed}]`)}` });
+	/**
+	 * Mark as success
+	 */
+	success(message?: string): void {
+		this.clearTickInterval();
+		this.spinner.success({ text: message || this.formatText() });
 	}
 
 	/**
@@ -134,8 +146,7 @@ export class ProgressSpinner {
 	 */
 	error(message?: string): void {
 		this.clearTickInterval();
-		const elapsed = formatDuration(this.getElapsedMs());
-		this.spinner.error({ text: `${message || this.formatText()} ${pc.red(`[${elapsed}]`)}` });
+		this.spinner.error({ text: message || this.formatText() });
 	}
 
 	/**
@@ -152,38 +163,4 @@ export class ProgressSpinner {
  */
 export function createSimpleSpinner(text: string): SpinnerInstance {
 	return createSpinner(text).start();
-}
-
-/**
- * Simple operation timer for tracking specific operations
- */
-export class OperationTimer {
-	private startTime: number;
-	private operationName: string;
-
-	constructor(operationName: string) {
-		this.operationName = operationName;
-		this.startTime = Date.now();
-	}
-
-	/**
-	 * Get elapsed time in milliseconds
-	 */
-	elapsedMs(): number {
-		return Date.now() - this.startTime;
-	}
-
-	/**
-	 * Get formatted elapsed time
-	 */
-	elapsed(): string {
-		return formatDuration(this.elapsedMs());
-	}
-
-	/**
-	 * Get operation name and elapsed time
-	 */
-	summary(): string {
-		return `${this.operationName}: ${this.elapsed()}`;
-	}
 }

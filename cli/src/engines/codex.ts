@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { BaseAIEngine, execCommand, formatCommandError } from "./base.ts";
 import type { AIResult, EngineOptions } from "./types.ts";
@@ -97,5 +97,18 @@ export class CodexEngine extends BaseAIEngine {
 				}
 			}
 		}
+	}
+
+	protected buildArgs(_prompt: string, _workDir: string, _options?: EngineOptions): string[] {
+		return [];
+	}
+
+	protected processCliResult(
+		_stdout: string,
+		_stderr: string,
+		_exitCode: number,
+		_workDir: string,
+	): AIResult {
+		return { success: true, response: "Not implemented", inputTokens: 0, outputTokens: 0 };
 	}
 }

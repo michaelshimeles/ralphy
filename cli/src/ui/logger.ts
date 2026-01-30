@@ -1,12 +1,21 @@
 import pc from "picocolors";
 
-let verboseMode = false;
+export let verboseMode = false;
 
 /**
  * Set verbose mode
  */
 export function setVerbose(verbose: boolean): void {
 	verboseMode = verbose;
+}
+
+/**
+ * Set debug mode (implies verbose)
+ */
+export function setDebug(debug: boolean): void {
+	if (debug) {
+		verboseMode = true;
+	}
 }
 
 /**

@@ -1,15 +1,16 @@
 import { logTaskProgress } from "../config/writer.ts";
 import type { AIEngine, AIResult } from "../engines/types.ts";
 import { createTaskBranch, returnToBaseBranch } from "../git/branch.ts";
-import { syncPrdToIssue } from "../git/issue-sync.ts";
 import { createPullRequest } from "../git/pr.ts";
-import type { Task, TaskSource } from "../tasks/types.ts";
+import type { TaskSource } from "../tasks/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
 import { ProgressSpinner } from "../ui/spinner.ts";
+import { standardizeError } from "../utils/errors.ts";
 import { clearDeferredTask, recordDeferredTask } from "./deferred.ts";
 import { buildPrompt } from "./prompt.ts";
-import { isFatalError, isRetryableError, sleep, withRetry } from "./retry.ts";
+import { isRetryableError, withRetry } from "./retry.ts";
+import { detectStateFormat, type StateFormat, TaskState, TaskStateManager } from "./task-state.ts";
 
 export interface ExecutionOptions {
 	engine: AIEngine;
@@ -34,12 +35,30 @@ export interface ExecutionOptions {
 	modelOverride?: string;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
+	/** Additional environment variables for the engine CLI */
+	env?: Record<string, string>;
 	/** Use lightweight sandboxes instead of git worktrees for parallel execution */
 	useSandbox?: boolean;
 	/** Additional arguments to pass to the engine CLI */
 	engineArgs?: string[];
-	/** GitHub issue number to sync PRD with on each iteration */
-	syncIssue?: number;
+	/** Separate model for planning phase (cheaper/faster) */
+	planningModel?: string;
+	/** Separate model for test-related tasks (cheaper/faster) */
+	testModel?: string;
+	/** Force non-git parallel execution (sandboxes) even in git repos */
+	noGitParallel?: boolean;
+	/** Log AI thoughts/reasoning to console */
+	logThoughts?: boolean;
+	/** Enable full debug logging (cli errors, full ai responses) */
+	debug?: boolean;
+	/** Enable comprehensive OpenCode debugging */
+	debugOpenCode?: boolean;
+	/** Allow OpenCode to access sandbox directories without permission prompts */
+	allowOpenCodeSandboxAccess?: boolean;
+	/** Progress callback for progress reporting */
+	onProgress?: (step: string) => void;
+	/** Task state manager for centralized state tracking */
+	taskStateManager?: TaskStateManager;
 }
 
 export interface ExecutionResult {
@@ -72,7 +91,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		activeSettings,
 		modelOverride,
 		engineArgs,
-		syncIssue,
+		taskStateManager: externalTaskStateManager,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -81,6 +100,20 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		totalInputTokens: 0,
 		totalOutputTokens: 0,
 	};
+
+	// Initialize task state manager if not provided
+	let taskStateManager: TaskStateManager;
+	if (externalTaskStateManager) {
+		taskStateManager = externalTaskStateManager;
+	} else {
+		const format: StateFormat = detectStateFormat(options.prdFile);
+
+		taskStateManager = new TaskStateManager(workDir, taskSource.type, options.prdFile || "tasks.yaml", format);
+
+		// Get all tasks and initialize state manager
+		const allTasks = await taskSource.getAllTasks();
+		await taskStateManager.initialize(allTasks);
+	}
 
 	let iteration = 0;
 	let abortDueToRetryableFailure = false;
@@ -92,15 +125,42 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 			break;
 		}
 
-		// Get next task
-		const task = await taskSource.getNextTask();
-		if (!task) {
+		// Get next pending task from state manager
+		const pendingTask = taskStateManager.getNextPendingTask();
+		if (!pendingTask) {
 			logSuccess("All tasks completed!");
 			break;
 		}
 
+		// Find the full task in the source
+		const allTasks = await taskSource.getAllTasks();
+		const task = allTasks.find((t) => t.id === pendingTask.id);
+		if (!task) {
+			logError(`Task ${pendingTask.id} not found in source`);
+			await taskStateManager.transitionState(pendingTask.id, TaskState.SKIPPED);
+			continue;
+		}
+
+		// Check if task has exceeded max attempts
+		if (taskStateManager.hasExceededMaxAttempts(task.id, maxRetries)) {
+			logWarn(`Task "${task.title}" has exceeded max attempts (${maxRetries}), skipping...`);
+			await taskStateManager.transitionState(task.id, TaskState.SKIPPED);
+			await taskSource.markComplete(task.id);
+			result.tasksFailed++;
+			notifyTaskFailed(task.title, "Exceeded maximum retry attempts");
+			clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
+			continue;
+		}
+
+		// Try to claim the task for execution
+		const claimed = await taskStateManager.claimTaskForExecution(task.id);
+		if (!claimed) {
+			logDebug(`Task "${task.title}" is already being executed, skipping...`);
+			continue;
+		}
+
 		iteration++;
-		const remaining = await taskSource.countRemaining();
+		const remaining = taskStateManager.countPending();
 		logInfo(`Task ${iteration}: ${task.title} (${remaining} remaining)`);
 
 		// Create branch if needed
@@ -129,7 +189,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		const spinner = new ProgressSpinner(task.title, activeSettings);
 		let aiResult: AIResult | null = null;
 
-		if (dryRun) {
+		if (dryRun && !options.debugOpenCode) {
 			spinner.success("(dry run) Skipped");
 		} else {
 			try {
@@ -141,7 +201,11 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						const engineOptions = {
 							...(modelOverride && { modelOverride }),
 							...(engineArgs && engineArgs.length > 0 && { engineArgs }),
+							...(options.debugOpenCode && { debugOpenCode: options.debugOpenCode }),
+							...(options.logThoughts !== undefined && { logThoughts: options.logThoughts }),
+							...(dryRun && { dryRun: true }),
 						};
+
 						if (engine.executeStreaming) {
 							return await engine.executeStreaming(
 								prompt,
@@ -170,20 +234,23 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 					},
 				);
 
+				if (options.debug) {
+					logDebug("Full AI Response:", aiResult.response);
+					if (aiResult.error) logDebug("Full AI Error:", aiResult.error);
+				}
+
 				if (aiResult.success) {
-					spinner.success(undefined, true); // Show timing breakdown
+					spinner.success();
 					result.totalInputTokens += aiResult.inputTokens;
 					result.totalOutputTokens += aiResult.outputTokens;
 
-					// Mark task complete
+					// Mark task complete in state manager
+					await taskStateManager.transitionState(task.id, TaskState.COMPLETED, undefined, {
+						branch: branch || undefined,
+					});
 					await taskSource.markComplete(task.id);
 					logTaskProgress(task.title, "completed", workDir);
 					result.tasksCompleted++;
-
-					// Sync PRD to GitHub issue if configured
-					if (syncIssue && options.prdFile) {
-						await syncPrdToIssue(options.prdFile, syncIssue, workDir);
-					}
 
 					notifyTaskComplete(task.title);
 					clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
@@ -210,6 +277,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						spinner.error(errMsg);
 						if (deferrals >= maxRetries) {
 							logError(`Task "${task.title}" failed after ${deferrals} deferrals: ${errMsg}`);
+							await taskStateManager.transitionState(task.id, TaskState.FAILED, errMsg);
 							logTaskProgress(task.title, "failed", workDir);
 							result.tasksFailed++;
 							notifyTaskFailed(task.title, errMsg);
@@ -217,34 +285,27 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 							clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
 						} else {
 							logWarn(`Temporary failure, stopping early (${deferrals}/${maxRetries}): ${errMsg}`);
+							await taskStateManager.transitionState(task.id, TaskState.DEFERRED, errMsg);
 							result.tasksFailed++;
 							abortDueToRetryableFailure = true;
 						}
-					} else if (isFatalError(errMsg)) {
-						// Fatal error (auth, config) - abort all remaining tasks
-						spinner.error(errMsg);
-						logError(`Fatal error: ${errMsg}`);
-						logError("Aborting remaining tasks due to configuration/authentication issue.");
-						result.tasksFailed++;
-						notifyTaskFailed(task.title, errMsg);
-						return result; // Exit immediately
 					} else {
 						spinner.error(errMsg);
+						await taskStateManager.transitionState(task.id, TaskState.FAILED, errMsg);
 						logTaskProgress(task.title, "failed", workDir);
 						result.tasksFailed++;
 						notifyTaskFailed(task.title, errMsg);
-						// Mark task complete so we don't retry it infinitely
-						await taskSource.markComplete(task.id);
 						clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
 					}
 				}
 			} catch (error) {
-				const errorMsg = error instanceof Error ? error.message : String(error);
+				const errorMsg = standardizeError(error).message;
 				if (isRetryableError(errorMsg)) {
 					const deferrals = recordDeferredTask(taskSource.type, task, workDir, options.prdFile);
 					spinner.error(errorMsg);
 					if (deferrals >= maxRetries) {
 						logError(`Task "${task.title}" failed after ${deferrals} deferrals: ${errorMsg}`);
+						await taskStateManager.transitionState(task.id, TaskState.FAILED, errorMsg);
 						logTaskProgress(task.title, "failed", workDir);
 						result.tasksFailed++;
 						notifyTaskFailed(task.title, errorMsg);
@@ -252,24 +313,16 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
 					} else {
 						logWarn(`Temporary failure, stopping early (${deferrals}/${maxRetries}): ${errorMsg}`);
+						await taskStateManager.transitionState(task.id, TaskState.DEFERRED, errorMsg);
 						result.tasksFailed++;
 						abortDueToRetryableFailure = true;
 					}
-				} else if (isFatalError(errorMsg)) {
-					// Fatal error (auth, config) - abort all remaining tasks
-					spinner.error(errorMsg);
-					logError(`Fatal error: ${errorMsg}`);
-					logError("Aborting remaining tasks due to configuration/authentication issue.");
-					result.tasksFailed++;
-					notifyTaskFailed(task.title, errorMsg);
-					return result; // Exit immediately
 				} else {
 					spinner.error(errorMsg);
+					await taskStateManager.transitionState(task.id, TaskState.FAILED, errorMsg);
 					logTaskProgress(task.title, "failed", workDir);
 					result.tasksFailed++;
 					notifyTaskFailed(task.title, errorMsg);
-					// Mark task complete so we don't retry it infinitely
-					await taskSource.markComplete(task.id);
 					clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
 				}
 			}

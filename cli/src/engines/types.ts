@@ -9,6 +9,8 @@ export interface AIResult {
 	/** Actual cost in dollars (if provided by engine) or duration in ms */
 	cost?: string;
 	error?: string;
+	/** Session ID if the engine supports it (like OpenCode) */
+	sessionId?: string;
 }
 
 /**
@@ -19,6 +21,16 @@ export interface EngineOptions {
 	modelOverride?: string;
 	/** Additional arguments to pass to the engine CLI */
 	engineArgs?: string[];
+	/** Additional environment variables for the engine CLI */
+	env?: Record<string, string>;
+	/** Enable comprehensive OpenCode debugging */
+	debugOpenCode?: boolean;
+	/** General debug flag */
+	debug?: boolean;
+	/** Whether this is a dry run (no actual AI execution) */
+	dryRun?: boolean;
+	/** Log AI thoughts/reasoning to console */
+	logThoughts?: boolean;
 }
 
 /**
@@ -57,5 +69,4 @@ export type AIEngineName =
 	| "codex"
 	| "qwen"
 	| "droid"
-	| "copilot"
-	| "gemini";
+	| "copilot";

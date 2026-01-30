@@ -11,6 +11,15 @@ export const ProjectSchema = z.object({
 });
 
 /**
+ * Lock configuration schema
+ */
+export const LockConfigSchema = z.object({
+	timeout: z.number().default(30000).optional(),
+	maxLocks: z.number().default(5000).optional(),
+	cleanupInterval: z.number().default(60000).optional(),
+});
+
+/**
  * Notifications schema for webhook configuration
  */
 export const NotificationsSchema = z.object({
@@ -52,6 +61,7 @@ export const RalphyConfigSchema = z.object({
 		.default([]),
 	boundaries: BoundariesSchema.default({}),
 	notifications: NotificationsSchema.default({}),
+	lockConfig: LockConfigSchema.default({}).optional(),
 });
 
 /**
@@ -92,7 +102,7 @@ export interface RuntimeOptions {
 	/** Maximum parallel agents */
 	maxParallel: number;
 	/** PRD source type */
-	prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github";
+	prdSource: "markdown" | "markdown-folder" | "yaml" | "csv" | "github";
 	/** PRD file or folder path */
 	prdFile: string;
 	/** Whether PRD path is a folder */
@@ -101,20 +111,37 @@ export interface RuntimeOptions {
 	githubRepo: string;
 	/** GitHub issue label filter */
 	githubLabel: string;
-	/** GitHub issue number to sync PRD with on each iteration */
-	syncIssue?: number;
 	/** Auto-commit changes */
 	autoCommit: boolean;
 	/** Browser automation mode: 'auto' | 'true' | 'false' */
 	browserEnabled: "auto" | "true" | "false";
-	/** Override default model for the engine */
+	/** Override default model for engine */
 	modelOverride?: string;
+	/** Separate model for planning phase (cheaper/faster) */
+	planningModel?: string;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
+	/** Force non-git parallel execution (sandboxes) even in git repos */
+	noGitParallel?: boolean;
+	/** Log AI thoughts/reasoning to console */
+	logThoughts?: boolean;
+	/** Enable full debug logging (cli errors, full ai responses) */
+	debug?: boolean;
+	/** Enable comprehensive OpenCode debugging with raw output, steps, and parsing */
+	debugOpenCode?: boolean;
 	/** Use lightweight sandboxes instead of git worktrees for parallel execution */
 	useSandbox?: boolean;
-	/** Additional arguments to pass to the engine CLI */
+	/** Additional arguments to pass to engine CLI */
 	engineArgs?: string[];
+	/** Lock configuration options */
+	lockConfig?: {
+		/** Lock timeout in milliseconds */
+		timeout?: number;
+		/** Maximum number of locks */
+		maxLocks?: number;
+		/** Cleanup interval in milliseconds */
+		cleanupInterval?: number;
+	};
 }
 
 /**
@@ -142,4 +169,8 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	githubLabel: "",
 	autoCommit: true,
 	browserEnabled: "auto",
+	noGitParallel: false,
+	logThoughts: true,
+	debug: false,
+	debugOpenCode: false,
 };
