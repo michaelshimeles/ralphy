@@ -1239,14 +1239,14 @@ get_tasks_in_group_yaml() {
 # ============================================
 
 get_tasks_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 200)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 300)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
   gh issue list "${args[@]}" \
     --jq 'sort_by(.number) | .[] | "\(.number):\(.title)"' 2>/dev/null || true
 }
 
 get_next_task_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 200)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 1)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
   gh issue list "${args[@]}" \
     --jq 'sort_by(.number) | .[0] | "\(.number):\(.title)"' 2>/dev/null \
