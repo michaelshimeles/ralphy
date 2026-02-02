@@ -1239,19 +1239,18 @@ get_tasks_in_group_yaml() {
 # ============================================
 
 get_tasks_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --json number,title)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 200)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
-
   gh issue list "${args[@]}" \
-    --jq '.[] | "\(.number):\(.title)"' 2>/dev/null || true
+    --jq 'sort_by(.number) | .[] | "\(.number):\(.title)"' 2>/dev/null || true
 }
 
 get_next_task_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --limit 1 --json number,title)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 200)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
-
   gh issue list "${args[@]}" \
-    --jq '.[0] | "\(.number):\(.title)"' 2>/dev/null | cut -c1-50 || echo ""
+    --jq 'sort_by(.number) | .[0] | "\(.number):\(.title)"' 2>/dev/null \
+    | cut -c1-50 || echo ""
 }
 
 count_remaining_github() {
@@ -1795,11 +1794,11 @@ parse_ai_result() {
       # These patterns match Copilot CLI's interactive elements and status messages
       local filtered_output
       filtered_output=$(echo "$result" | grep -v "^\?" | grep -v "^❯" | grep -v "Thinking..." | grep -v "Working on it..." | sed '/^$/d')
-      
+
       # Extract response from filtered output
       # Get last 10 lines from first 20 to capture the main response while filtering preamble
       response=$(echo "$filtered_output" | head -20 | tail -10 || echo "Task completed")
-      
+
       # Tokens remain 0 for Copilot (not available in programmatic mode)
       input_tokens=0
       output_tokens=0
