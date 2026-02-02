@@ -1246,12 +1246,18 @@ get_tasks_github() {
 }
 
 get_next_task_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 1)
-  [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
-  gh issue list "${args[@]}" \
-    --jq 'sort_by(.number) | .[0] | "\(.number):\(.title)"' 2>/dev/null \
-    | cut -c1-50 || echo ""
+  local search="is:issue is:open sort:created-asc"
+  [[ -n "$GITHUB_LABEL" ]] && search="$search label:\"$GITHUB_LABEL\""
+
+  gh issue list \
+    --repo "$GITHUB_REPO" \
+    --search "$search" \
+    --limit 1 \
+    --json number,title \
+    --jq '.[0] | "\(.number):\(.title)"' \
+    2>/dev/null | cut -c1-50 || echo ""
 }
+
 
 count_remaining_github() {
   local args=(--repo "$GITHUB_REPO" --state open --json number)
