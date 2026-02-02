@@ -1239,9 +1239,9 @@ get_tasks_in_group_yaml() {
 # ============================================
 
 get_tasks_github() {
-  local args=(--repo "$GITHUB_REPO" --state open --json number,title --limit 300)
+  local args=(--repo "$GITHUB_REPO" --state open --json number,title)
   [[ -n "$GITHUB_LABEL" ]] && args+=(--label "$GITHUB_LABEL")
-  gh issue list "${args[@]}" \
+  gh issue list "${args[@]}" --limit "${GITHUB_ISSUE_LIMIT:-300}" \
     --jq 'sort_by(.number) | .[] | "\(.number):\(.title)"' 2>/dev/null || true
 }
 
