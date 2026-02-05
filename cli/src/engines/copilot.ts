@@ -10,7 +10,10 @@ import type { AIResult, EngineOptions } from "./types.ts";
 const TEMP_DIR = join(tmpdir(), "ralphy-copilot");
 
 /**
- * GitHub Copilot CLI AI Engine
+ * GitHub Copilot CLI AI Engine (Legacy Implementation)
+ *
+ * This is the legacy implementation using text parsing of CLI output.
+ * For new code, use CopilotAcpEngine which uses the Agent Client Protocol.
  *
  * Note: executeStreaming is intentionally not implemented for Copilot
  * because the streaming function can hang on Windows due to how
@@ -25,6 +28,8 @@ const TEMP_DIR = join(tmpdir(), "ralphy-copilot");
  * The -p parameter accepts a file path, which avoids shell escaping issues and
  * maintains the full structure of markdown (newlines, code blocks, etc.) that
  * would be lost if passed as a command line string.
+ *
+ * @deprecated Use CopilotAcpEngine instead for better protocol-based communication
  */
 export class CopilotEngine extends BaseAIEngine {
 	name = "GitHub Copilot";

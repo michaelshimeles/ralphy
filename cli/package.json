@@ -44,13 +44,14 @@
 		"url": "https://github.com/michaelshimeles/ralphy"
 	},
 	"dependencies": {
-		"commander": "^13.0.0",
-		"yaml": "^2.7.0",
-		"simple-git": "^3.27.0",
+		"@agentclientprotocol/sdk": "^0.13.1",
 		"@octokit/rest": "^21.0.0",
-		"picocolors": "^1.1.0",
+		"commander": "^13.0.0",
 		"nanospinner": "^1.2.0",
 		"node-notifier": "^10.0.1",
+		"picocolors": "^1.1.0",
+		"simple-git": "^3.27.0",
+		"yaml": "^2.7.0",
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {

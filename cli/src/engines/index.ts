@@ -7,10 +7,12 @@ export * from "./codex.ts";
 export * from "./qwen.ts";
 export * from "./droid.ts";
 export * from "./copilot.ts";
+export * from "./copilot-acp.ts";
 export * from "./gemini.ts";
 
 import { ClaudeEngine } from "./claude.ts";
 import { CodexEngine } from "./codex.ts";
+import { CopilotAcpEngine } from "./copilot-acp.ts";
 import { CopilotEngine } from "./copilot.ts";
 import { CursorEngine } from "./cursor.ts";
 import { DroidEngine } from "./droid.ts";
@@ -37,7 +39,8 @@ export function createEngine(name: AIEngineName): AIEngine {
 		case "droid":
 			return new DroidEngine();
 		case "copilot":
-			return new CopilotEngine();
+			// Use ACP-based implementation for better protocol communication
+			return new CopilotAcpEngine();
 		case "gemini":
 			return new GeminiEngine();
 		default:
