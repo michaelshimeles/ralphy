@@ -1,5 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import simpleGit from "simple-git";
 import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
@@ -27,7 +27,15 @@ import { clearDeferredTask, recordDeferredTask } from "./deferred.ts";
 import { buildParallelPrompt } from "./prompt.ts";
 import { isRetryableError, withRetry } from "./retry.ts";
 import { commitSandboxChanges } from "./sandbox-git.ts";
-import { cleanupSandbox, createSandbox, getModifiedFiles, getSandboxBase } from "./sandbox.ts";
+import {
+	cleanupSandbox,
+	createSandbox,
+	DEFAULT_IGNORED,
+	getModifiedFiles,
+	getSandboxBase,
+	isIgnored,
+	matchesPattern,
+} from "./sandbox.ts";
 import type { ExecutionOptions, ExecutionResult } from "./sequential.ts";
 
 interface ParallelAgentResult {
@@ -459,10 +467,47 @@ export async function runParallel(
 			if (!failureReason && aiResult?.success && agentUsedSandbox && worktreeDir) {
 				try {
 					const modifiedFiles = await getModifiedFiles(worktreeDir, workDir);
-					if (modifiedFiles.length > 0) {
+					const filteredFiles = modifiedFiles.filter((f) => {
+
+						if (f.trim() === "") {
+							return false;
+						}
+
+						const normalized = f.replace(/\\/g, "/");
+
+						// Check against all default ignore patterns
+						for (const pattern of DEFAULT_IGNORED) {
+							if (pattern.endsWith("/")) {
+								const dir = pattern.slice(0, -1);
+								// Directory Patterns (e.g. ".ralphy/")
+								// Check for exact directory match or paths strictly inside it.
+								// We append "/" to the prefix check to ensure strict boundary matching,
+								// preventing false positives for lookalike directories (e.g. ".ralphy-config").
+								if (normalized === dir || normalized.startsWith(dir + "/")) {
+									logDebug(`Agent ${agentNum}: Filtered infrastructure file: ${f}`);
+									return false;
+								}
+							} else {
+								// File/Glob Patterns (e.g. "nul", "*.log")
+								// We pass the basename to matchesPattern() to support recursive filtering.
+								// This ensures patterns like "*.log" match "src/debug.log" anywhere in the tree,
+								// mimicking standard gitignore behavior for patterns without slashes.
+								// Note: Per git docs, patterns WITHOUT a leading slash match at ANY level.
+								// Only patterns WITH a slash (e.g. "/nul") would be root-anchored.
+								const baseName = normalized.split("/").pop() || "";
+								if (matchesPattern(baseName, pattern, false)) {
+									logDebug(`Agent ${agentNum}: Filtered ignored file: ${f}`);
+									return false;
+								}
+							}
+						}
+
+						return true;
+					});
+					if (filteredFiles.length > 0) {
 						const commitResult = await commitSandboxChanges(
 							workDir,
-							modifiedFiles,
+							filteredFiles,
 							worktreeDir,
 							task.title,
 							agentNum,

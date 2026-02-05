@@ -56,6 +56,61 @@ export async function rmRF(path: string): Promise<void> {
 }
 
 /**
+ * Simple glob matcher to avoid adding heavy dependencies.
+ * Supports:
+ * - Suffix: "*.log" (matches "debug.log", "path/to/debug.log")
+ * - Prefix: "test*" (matches "test1", "test-file")
+ * - Tree: "node_modules/**" (matches "node_modules", "node_modules/file.js") - Checks strict directory boundary
+ * - Exact: "node_modules" (matches "node_modules")
+ * - Middle: "test.*.js" (matches "test.foo.js") - Uses regex escaping
+ *
+ * @internal Exported for testing
+ */
+export function matchesPattern(filename: string, pattern: string, isDirectory?: boolean): boolean {
+	// Exact match: "node_modules" matches "node_modules"
+	if (pattern === filename) return true;
+
+	// Directory match: "node_modules/" matches "node_modules" if it is a directory
+	if (pattern.endsWith("/")) {
+		// If we know it's a file, it can't match a directory pattern
+		if (isDirectory === false) return false;
+		// Check if filename matches pattern without trailing slash
+		return filename === pattern.slice(0, -1);
+	}
+
+	// Tree match: "dir/**" matches "dir/foo/bar.js"
+	if (pattern.endsWith("/**")) {
+		const dir = pattern.slice(0, -3);
+		return filename === dir || filename.startsWith(dir + "/");
+	}
+
+	// Suffix match: "*.log" matches "debug.log" (single wildcard at start only)
+	// Uses endsWith() string comparison, not regex - so "." is treated literally
+	if (pattern.startsWith("*") && !pattern.includes("*", 1)) return filename.endsWith(pattern.slice(1));
+
+	// Prefix match: "test*" matches "test123" (single wildcard at end only)
+	// Uses startsWith() string comparison, not regex - so "." is treated literally
+	if (pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) return filename.startsWith(pattern.slice(0, -1));
+
+	// Middle/complex wildcards: "test.*.js" matches "test.foo.js"
+	// Escape regex metacharacters, then convert * to .*
+	if (pattern.includes("*")) {
+		const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, ".*");
+		return new RegExp(`^${escaped}$`).test(filename);
+	}
+
+	return false;
+}
+
+/**
+ * Check if a file should be ignored based on a list of patterns.
+ * @internal Exported for testing
+ */
+export function isIgnored(item: string, patterns: string[], isDirectory?: boolean): boolean {
+	return patterns.some((p) => matchesPattern(item, p, isDirectory));
+}
+
+/**
  * Default directories to symlink (read-only dependencies).
  * These are never modified by agents, so sharing them saves disk space.
  * Note: build/dist are NOT symlinked to allow agents to run independent builds.
@@ -110,6 +165,17 @@ export const DEFAULT_COPY_PATTERNS = [
 	"pyproject.toml",
 ];
 
+/**
+ * Directories/files that should ALWAYS be ignored (neither copied nor symlinked).
+ * Agents don't need .ralphy/ - config is read by main runner, progress is tracked by main runner.
+ */
+export const DEFAULT_IGNORED = [
+	".ralphy-sandboxes/",
+	".ralphy-worktrees/",
+	".ralphy/",
+	"nul",
+];
+
 export interface SandboxOptions {
 	/** Original working directory */
 	originalDir: string;
@@ -159,8 +225,19 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 	mkdirSync(sandboxDir, { recursive: true });
 
 	try {
-		// Get all items in the original directory
-		const items = readdirSync(originalDir);
+		// Get all items in the original directory, filtering out ignored items
+		const items = readdirSync(originalDir).filter((item) => {
+			const itemPath = join(originalDir, item);
+			// We need to check if it's a directory to support trailing slash patterns
+			let isDir = false;
+			try {
+				const stat = lstatSync(itemPath);
+				isDir = stat.isDirectory();
+			} catch {
+				// If stat fails, assume false (or skip)
+			}
+			return !isIgnored(item, DEFAULT_IGNORED, isDir);
+		});
 
 		// Track which items we've handled
 		const handled = new Set<string>();
@@ -193,7 +270,7 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 			if (handled.has(item)) continue;
 
 			const originalPath = join(originalDir, item);
-			const sandboxPath = join(sandboxDir, item);
+			const sandboxPathItem = join(sandboxDir, item);
 
 			// Skip if it's a symlink pointing outside (like node_modules might be)
 			try {
@@ -204,20 +281,28 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 					const target = readlinkSync(originalPath);
 					const resolvedTarget = join(dirname(originalPath), target);
 					if (existsSync(resolvedTarget)) {
-						symlinkSync(target, sandboxPath);
+						symlinkSync(target, sandboxPathItem);
 						symlinksCreated++;
 					} else {
 						logDebug(`Agent ${agentNum}: Skipping broken symlink ${item} -> ${target}`);
 					}
 				} else if (stat.isDirectory()) {
-					// Copy directory recursively, preserving timestamps for change detection
-					cpSync(originalPath, sandboxPath, { recursive: true, preserveTimestamps: true });
+					// Copy directory recursively using smart copy
+					const stats = copyRecursive(
+						originalPath,
+						sandboxPathItem,
+						DEFAULT_IGNORED,
+						symlinkDirs,
+						agentNum,
+					);
+					// Count top-level directory as 1 copy (ignoring internal file count)
 					filesCopied++;
+					symlinksCreated += stats.symlinks;
 				} else if (stat.isFile()) {
 					// Copy file and preserve timestamps for change detection
-					copyFileSync(originalPath, sandboxPath);
+					copyFileSync(originalPath, sandboxPathItem);
 					try {
-						utimesSync(sandboxPath, stat.atime, stat.mtime);
+						utimesSync(sandboxPathItem, stat.atime, stat.mtime);
 					} catch (utimeErr) {
 						logDebug(`Agent ${agentNum}: Failed to preserve timestamps for ${item}: ${utimeErr}`);
 					}
@@ -371,4 +456,99 @@ export function getSandboxBase(workDir: string): string {
 		mkdirSync(sandboxBase, { recursive: true });
 	}
 	return sandboxBase;
+}
+
+/**
+ * Recursively copy a directory:
+ * - Skips directories in 'ignoreNames'
+ * - Creates symlinks for directories in 'symlinkNames' (instead of recursing)
+ * - Copies everything else
+ */
+function copyRecursive(
+	src: string,
+	dest: string,
+	ignoreNames: string[],
+	symlinkNames: string[],
+	agentNum: number,
+): { files: number; symlinks: number } {
+	let files = 0;
+	let symlinks = 0;
+
+	if (!existsSync(src)) return { files, symlinks };
+
+	if (!existsSync(dest)) {
+		mkdirSync(dest, { recursive: true });
+	}
+
+	const items = readdirSync(src);
+	for (const item of items) {
+		const srcPath = join(src, item);
+		
+		let stat;
+		try {
+			stat = lstatSync(srcPath);
+		} catch {
+			continue;
+		}
+
+		// Skip ignored items (pass isDirectory flag)
+		if (isIgnored(item, ignoreNames, stat.isDirectory())) {
+			continue;
+		}
+
+		const destPath = join(dest, item);
+
+		try {
+			if (stat.isDirectory()) {
+				// Symlink read-only dependency dirs (node_modules, vendor, etc.) even when nested.
+				// This is intentional for performance - agents don't modify dependencies, only source files.
+				// Sharing these across sandboxes avoids duplicating GBs of packages per agent.
+				if (symlinkNames.includes(item)) {
+					try {
+						// Create a junction/symlink to the SOURCE directory
+						symlinkSync(srcPath, destPath, "junction");
+						logDebug(`Agent ${agentNum}: Symlinked nested dir ${item}`);
+						symlinks++;
+					} catch (symlinkErr) {
+						// Fallback: if symlink fails, try to copy responsibly
+						logDebug(
+							`Agent ${agentNum}: Failed to symlink nested ${item}, falling back to copy: ${symlinkErr}`,
+						);
+						const subStats = copyRecursive(
+							srcPath,
+							destPath,
+							ignoreNames,
+							symlinkNames,
+							agentNum,
+						);
+						files += subStats.files;
+						symlinks += subStats.symlinks;
+					}
+				} else {
+					// Normal directory: recurse
+					const subStats = copyRecursive(
+						srcPath,
+						destPath,
+						ignoreNames,
+						symlinkNames,
+						agentNum,
+					);
+					files += subStats.files;
+					symlinks += subStats.symlinks;
+				}
+			} else if (stat.isFile()) {
+				copyFileSync(srcPath, destPath);
+				files++;
+				try {
+					utimesSync(destPath, stat.atime, stat.mtime);
+				} catch {
+					// Ignore timestamp errors
+				}
+			}
+		} catch (err) {
+			logDebug(`Agent ${agentNum}: Failed to copy ${item} in recursive copy: ${err}`);
+		}
+	}
+
+	return { files, symlinks };
 }

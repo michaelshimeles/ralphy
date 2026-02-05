@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { slugify } from "../git/branch.ts";
 import { logDebug } from "../ui/logger.ts";
+import { DEFAULT_IGNORED, matchesPattern } from "./sandbox.ts";
 
 /**
  * Simple mutex to serialize git operations across sandbox agents.
@@ -38,6 +39,44 @@ function generateUniqueId(): string {
 	return `${timestamp}-${random}`;
 }
 
+/** Safe git add: batches files (avoids ENAMETOOLONG) and filters ignored files */
+async function safeGitAdd(git: SimpleGit, files: string[], batchSize = 20): Promise<number> {
+	if (!files?.length) return 0;
+
+	// Filter out ignored files first
+	const ignoredSet = new Set<string>();
+	for (let i = 0; i < files.length; i += batchSize) {
+		try {
+			const result = await git.checkIgnore(files.slice(i, i + batchSize));
+			result.forEach((f) => ignoredSet.add(f.replace(/\\/g, "/")));
+		} catch { /* check-ignore exits 1 if nothing ignored */ }
+	}
+	const filtered = ignoredSet.size > 0
+		? files.filter((f) => !ignoredSet.has(f.replace(/\\/g, "/")))
+		: files;
+
+	if (!filtered.length) return 0;
+
+	// Add in batches with retry for lock contention
+	for (let i = 0; i < filtered.length; i += batchSize) {
+		const batch = filtered.slice(i, i + batchSize);
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				await git.add(batch);
+				break;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				if ((msg.includes("index.lock") || msg.includes("lock file")) && attempt < 3) {
+					await new Promise((r) => setTimeout(r, attempt * 500));
+					continue;
+				}
+				throw err;
+			}
+		}
+	}
+	return filtered.length;
+}
+
 /**
  * Result of committing sandbox changes to a branch
  */
@@ -65,13 +104,9 @@ export async function commitSandboxChanges(
 	agentNum: number,
 	baseBranch: string,
 ): Promise<SandboxCommitResult> {
-	if (modifiedFiles.length === 0) {
-		return {
-			success: true,
-			branchName: "",
-			filesCommitted: 0,
-		};
-	}
+	// Note: We don't return early even if modifiedFiles is empty,
+	// because composer/npm may have installed files in symlinked directories
+	// that we need to detect via git status in Phase 2.
 
 	const uniqueId = generateUniqueId();
 	const branchName = `ralphy/agent-${agentNum}-${uniqueId}-${slugify(taskName)}`;
@@ -104,14 +139,81 @@ export async function commitSandboxChanges(
 				}
 			}
 
-			// Stage all modified files
-			await git.add(modifiedFiles);
+			// TWO-PHASE STAGING APPROACH:
+			// Phase 1: Stage the explicitly filtered files passed from parallel.ts
+			// These are source files the agent intentionally modified
+			if (modifiedFiles.length > 0) {
+				const filesToStage = modifiedFiles.filter((f) => {
+					const fullPath = join(originalDir, f);
+					return existsSync(fullPath);
+				});
+				const staged = await safeGitAdd(git, filesToStage);
+				if (staged > 0) {
+					logDebug(`Agent ${agentNum}: Staged ${staged} filtered files`);
+				}
+			}
+
+			// Phase 2: Find additional untracked/modified files via git status
+			// This catches files installed by composer/npm in symlinked directories
+			// that aren't detected by the sandbox file comparison
+			const status = await git.status();
+			const additionalFiles: string[] = [];
+
+			// Collect untracked and modified files, excluding infrastructure
+			// Uses same logic as parallel.ts for consistency
+			for (const file of [...status.not_added, ...status.modified, ...status.created]) {
+				const normalized = file.replace(/\\/g, "/");
+				let isInfra = false;
+
+				for (const pattern of DEFAULT_IGNORED) {
+					if (pattern.endsWith("/")) {
+						const dir = pattern.slice(0, -1);
+						if (normalized === dir || normalized.startsWith(dir + "/")) {
+							isInfra = true;
+							break;
+						}
+					} else {
+						const baseName = normalized.split("/").pop() || "";
+						if (matchesPattern(baseName, pattern, false)) {
+							isInfra = true;
+							break;
+						}
+					}
+				}
+
+				// Exclude files already staged in Phase 1?
+				// NO: We purposefully check EVERYTHING in Phase 2 as a safety net.
+				// If Phase 1 failed to stage a file (e.g. path issues), Phase 2 MUST catch it.
+				// Git handles duplicate 'add' operations gracefully (idempotent).
+				if (!isInfra) {
+					additionalFiles.push(file);
+				}
+			}
+
+			if (additionalFiles.length > 0) {
+				const staged = await safeGitAdd(git, additionalFiles);
+				if (staged > 0) {
+					logDebug(`Agent ${agentNum}: Staged ${staged} additional files (composer/npm installs)`);
+				}
+			}
+
+			// Check if we have anything to commit
+			const finalStatus = await git.status();
+			if (finalStatus.staged.length === 0) {
+				logDebug(`Agent ${agentNum}: No changes to commit after staging`);
+				await git.checkout(currentBranch);
+				return {
+					success: true,
+					branchName,
+					filesCommitted: 0,
+				};
+			}
 
 			// Commit
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
 			await git.commit(commitMessage);
 
-			logDebug(`Agent ${agentNum}: Committed ${modifiedFiles.length} files to ${branchName}`);
+			logDebug(`Agent ${agentNum}: Committed ${finalStatus.staged.length} files to ${branchName}`);
 
 			// Return to original branch
 			await git.checkout(currentBranch);
@@ -119,7 +221,7 @@ export async function commitSandboxChanges(
 			return {
 				success: true,
 				branchName,
-				filesCommitted: modifiedFiles.length,
+				filesCommitted: finalStatus.staged.length,
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
