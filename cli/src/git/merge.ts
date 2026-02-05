@@ -103,9 +103,17 @@ export async function createIntegrationBranch(
 	groupNum: number,
 	baseBranch: string,
 	workDir: string,
+	prefix?: string,
 ): Promise<string> {
 	const git: SimpleGit = simpleGit(workDir);
-	const branchName = `ralphy/integration-group-${groupNum}`;
+	
+	let branchName = `ralphy/integration-group-${groupNum}`;
+	
+	if (prefix) {
+		// Sanitize prefix: replace non-alphanumeric chars (mostly slashes) with dashes
+		const sanitizedPrefix = prefix.replace(/[^a-zA-Z0-9-]/g, "-");
+		branchName = `ralphy/${sanitizedPrefix}-integration-group-${groupNum}`;
+	}
 
 	// Checkout base branch first
 	await git.checkout(baseBranch);
