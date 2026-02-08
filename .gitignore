@@ -1,3 +1,5 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
 # CLI Dependencies
 cli/node_modules/
 
@@ -10,6 +12,32 @@ landing/node_modules/
 landing/.next/
 landing/out/
 landing/bun.lock
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
 
 # Bun
 bun.lockb
@@ -28,6 +56,21 @@ bun.lockb
 .DS_Store
 Thumbs.db
 
+# macOS
+*.pem
+
 # Logs
 *.log
 cli/package-lock.json
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+app-example
+
+# Code review documentation (not for version control)
+CODE_REVIEW.md
+.vercel

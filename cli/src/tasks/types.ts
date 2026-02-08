@@ -12,6 +12,8 @@ export interface Task {
 	parallelGroup?: number;
 	/** Whether the task is completed */
 	completed: boolean;
+	/** Model to use for this task (overrides global model) */
+	model?: string;
 }
 
 /**

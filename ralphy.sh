@@ -27,8 +27,8 @@ AUTO_COMMIT=true
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, or copilot
-MODEL_OVERRIDE=""   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
+AI_ENGINE="opencode"  # claude, opencode, cursor, codex, qwen, droid, or copilot
+MODEL_OVERRIDE="kimi-k2.5-free"   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
 MAX_RETRIES=3
@@ -1795,11 +1795,11 @@ parse_ai_result() {
       # These patterns match Copilot CLI's interactive elements and status messages
       local filtered_output
       filtered_output=$(echo "$result" | grep -v "^\?" | grep -v "^❯" | grep -v "Thinking..." | grep -v "Working on it..." | sed '/^$/d')
-      
+
       # Extract response from filtered output
       # Get last 10 lines from first 20 to capture the main response while filtering preamble
       response=$(echo "$filtered_output" | head -20 | tail -10 || echo "Task completed")
-      
+
       # Tokens remain 0 for Copilot (not available in programmatic mode)
       input_tokens=0
       output_tokens=0

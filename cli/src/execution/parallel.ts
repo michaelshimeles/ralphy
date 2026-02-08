@@ -111,8 +111,10 @@ async function runAgentInWorktree(
 		});
 
 		// Execute with retry
+		// Task-specific model takes precedence over global modelOverride
+		const effectiveModel = task.model || modelOverride;
 		const engineOptions = {
-			...(modelOverride && { modelOverride }),
+			...(effectiveModel && { modelOverride: effectiveModel }),
 			...(engineArgs && engineArgs.length > 0 && { engineArgs }),
 		};
 		const result = await withRetry(
@@ -205,8 +207,10 @@ async function runAgentInSandbox(
 		});
 
 		// Execute with retry
+		// Task-specific model takes precedence over global modelOverride
+		const effectiveModel = task.model || modelOverride;
 		const engineOptions = {
-			...(modelOverride && { modelOverride }),
+			...(effectiveModel && { modelOverride: effectiveModel }),
 			...(engineArgs && engineArgs.length > 0 && { engineArgs }),
 		};
 		const result = await withRetry(

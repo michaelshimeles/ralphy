@@ -138,8 +138,10 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						spinner.updateStep("Working");
 
 						// Use streaming if available
+						// Task-specific model takes precedence over global modelOverride
+						const effectiveModel = task.model || modelOverride;
 						const engineOptions = {
-							...(modelOverride && { modelOverride }),
+							...(effectiveModel && { modelOverride: effectiveModel }),
 							...(engineArgs && engineArgs.length > 0 && { engineArgs }),
 						};
 						if (engine.executeStreaming) {

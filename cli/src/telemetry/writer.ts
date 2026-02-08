@@ -56,7 +56,7 @@ export class TelemetryWriter {
 	async writeSession(session: Session | SessionFull): Promise<void> {
 		await this.ensureDir();
 		const path = join(this.outputDir, SESSIONS_FILE);
-		const line = JSON.stringify(session) + "\n";
+		const line = `${JSON.stringify(session)}\n`;
 		await appendFile(path, line, "utf-8");
 	}
 
@@ -68,7 +68,7 @@ export class TelemetryWriter {
 
 		await this.ensureDir();
 		const path = join(this.outputDir, TOOL_CALLS_FILE);
-		const lines = toolCalls.map((call) => JSON.stringify(call)).join("\n") + "\n";
+		const lines = `${toolCalls.map((call) => JSON.stringify(call)).join("\n")}\n`;
 		await appendFile(path, lines, "utf-8");
 	}
 

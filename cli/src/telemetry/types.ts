@@ -155,3 +155,32 @@ export interface RawExportEntry {
 	type: "session" | "tool_call";
 	data: Session | SessionFull | ToolCall;
 }
+
+/**
+ * Telemetry webhook payload
+ */
+export interface TelemetryWebhookPayload {
+	event: "telemetry_session";
+	version: string;
+	timestamp: string;
+	session: {
+		sessionId: string;
+		engine: string;
+		mode: string;
+		cliVersion: string;
+		platform: string;
+		totalTokensIn: number;
+		totalTokensOut: number;
+		totalDurationMs: number;
+		taskCount: number;
+		successCount: number;
+		failedCount: number;
+		toolCalls: ToolCallSummary[];
+		tags?: string[];
+	};
+	details?: {
+		prompt?: string;
+		response?: string;
+		filePaths?: string[];
+	};
+}

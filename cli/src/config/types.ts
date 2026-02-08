@@ -17,6 +17,7 @@ export const NotificationsSchema = z.object({
 	discord_webhook: z.string().default(""),
 	slack_webhook: z.string().default(""),
 	custom_webhook: z.string().default(""),
+	telemetry_webhook: z.string().default(""),
 });
 
 /**

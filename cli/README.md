@@ -137,12 +137,33 @@ Tasks are tracked per-file so completion updates the correct file.
 ```bash
 ralphy --yaml tasks.yaml
 ```
+
+Two formats supported:
+
+**1. Subsections format** (organized by category):
+```yaml
+tasks:
+  setup:
+    - title: create auth
+      completed: false
+      model: claude  # optional per-task model
+    - title: setup db
+      completed: false
+  features:
+    - title: add dashboard
+      completed: false
+      parallel_group: 1
+```
+
+**2. Flat array format** (simple list):
 ```yaml
 tasks:
   - title: create auth
     completed: false
+    model: claude  # optional per-task model
   - title: add dashboard
     completed: false
+    parallel_group: 1
 ```
 
 **JSON**:
@@ -189,13 +210,16 @@ With `--no-merge`: keeps branches without merging or creating PRs.
 
 **YAML parallel groups** - control execution order:
 ```yaml
+# Works with both subsection and flat formats
 tasks:
-  - title: Create User model
-    parallel_group: 1
-  - title: Create Post model
-    parallel_group: 1  # same group = runs together
-  - title: Add relationships
-    parallel_group: 2  # runs after group 1
+  models:
+    - title: Create User model
+      parallel_group: 1
+    - title: Create Post model
+      parallel_group: 1  # same group = runs together
+  relations:
+    - title: Add relationships
+      parallel_group: 2  # runs after group 1
 ```
 
 ## Branch Workflow

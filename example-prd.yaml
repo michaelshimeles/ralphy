@@ -1,93 +1,104 @@
 # Example PRD - Task List (YAML Format)
 #
 # This is an example PRD in YAML format for use with ralphy.
-# YAML format supports parallel task groups for concurrent execution.
+# YAML format supports:
+#   - Subsections to organize tasks by category
+#   - Per-task model selection
+#   - Parallel task groups for concurrent execution
 #
 # Usage:
 #   ralphy --yaml example-prd.yaml
 #   ralphy --yaml example-prd.yaml --parallel  # Run parallel groups concurrently
 
+# Format option 1: Subsections with categories
 tasks:
-  # Sequential tasks (parallel_group: 0 or omitted = run one at a time)
-  - title: Initialize the project with the chosen framework
-    completed: false
-    description: |
-      Set up a new project using the appropriate framework.
-      Include TypeScript configuration and basic folder structure.
+  # Setup tasks
+  setup:
+    - title: Initialize the project with the chosen framework
+      completed: false
+      model: claude  # Use Claude for this task
+      description: |
+        Set up a new project using the appropriate framework.
+        Include TypeScript configuration and basic folder structure.
 
-  - title: Set up the development environment and install dependencies
-    completed: false
+    - title: Set up the development environment and install dependencies
+      completed: false
+      model: opencode/kimi-k2.5-free  # Use OpenCode for this task
 
-  - title: Configure linting and formatting tools (ESLint, Prettier)
-    completed: false
+  # Configuration tasks
+  config:
+    - title: Configure linting and formatting tools (ESLint, Prettier)
+      completed: false
 
-  # Parallel group 1 - These tasks can run concurrently
-  - title: Create the main application layout and navigation
-    completed: false
-    parallel_group: 1
+    - title: Set up authentication provider configuration
+      completed: false
+      parallel_group: 1
 
-  - title: Design and create the database schema
-    completed: false
-    parallel_group: 1
+  # Database tasks - can run in parallel with auth
+  database:
+    - title: Design and create the database schema
+      completed: false
+      parallel_group: 1
+      model: claude
 
-  - title: Set up authentication provider configuration
-    completed: false
-    parallel_group: 1
+  # Feature implementation
+  features:
+    - title: Implement user authentication (login, signup, logout)
+      completed: false
+      parallel_group: 2
 
-  # Parallel group 2 - Another set of concurrent tasks
-  - title: Implement user authentication (login, signup, logout)
-    completed: false
-    parallel_group: 2
+    - title: Implement API endpoints for CRUD operations
+      completed: false
+      parallel_group: 2
 
-  - title: Implement API endpoints for CRUD operations
-    completed: false
-    parallel_group: 2
+    - title: Build the dashboard page with key metrics
+      completed: false
+      parallel_group: 2
 
-  - title: Build the dashboard page with key metrics
-    completed: false
-    parallel_group: 2
+  # Polish tasks
+  polish:
+    - title: Add data fetching and state management
+      completed: false
 
-  # Back to sequential tasks
-  - title: Add data fetching and state management
-    completed: false
+    - title: Style components with Tailwind CSS
+      completed: false
 
-  - title: Add input validation and error handling
-    completed: false
+    - title: Add loading states and skeleton screens
+      completed: false
 
-  - title: Style components with Tailwind CSS
-    completed: false
+  # Testing tasks - can run in parallel
+  testing:
+    - title: Write unit tests for core functions
+      completed: false
+      parallel_group: 3
 
-  - title: Add loading states and skeleton screens
-    completed: false
+    - title: Add integration tests for API endpoints
+      completed: false
+      parallel_group: 3
 
-  - title: Implement toast notifications for user feedback
-    completed: false
+    - title: Test user flows end-to-end
+      completed: false
+      parallel_group: 3
 
-  - title: Ensure responsive design for mobile devices
-    completed: false
+  # Deployment tasks
+  deployment:
+    - title: Configure environment variables for production
+      completed: false
 
-  # Parallel group 3 - Testing tasks can run in parallel
-  - title: Write unit tests for core functions
-    completed: false
-    parallel_group: 3
+    - title: Set up CI/CD pipeline
+      completed: false
 
-  - title: Add integration tests for API endpoints
-    completed: false
-    parallel_group: 3
+    - title: Deploy to production environment
+      completed: false
 
-  - title: Test user flows end-to-end
-    completed: false
-    parallel_group: 3
-
-  # Final sequential tasks
-  - title: Configure environment variables for production
-    completed: false
-
-  - title: Set up CI/CD pipeline
-    completed: false
-
-  - title: Deploy to production environment
-    completed: false
-
-  - title: Verify deployment and run smoke tests
-    completed: false
+# Format option 2: Flat array (no subsections)
+# Uncomment below and comment out above to use flat format:
+#
+# tasks:
+#   - title: Initialize the project
+#     completed: false
+#     model: claude
+#
+#   - title: Set up database
+#     completed: false
+#     model: opencode/kimi-k2.5-free
