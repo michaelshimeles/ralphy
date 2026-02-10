@@ -8,6 +8,7 @@ export * from "./qwen.ts";
 export * from "./droid.ts";
 export * from "./copilot.ts";
 export * from "./gemini.ts";
+export * from "./kimi.ts";
 
 import { ClaudeEngine } from "./claude.ts";
 import { CodexEngine } from "./codex.ts";
@@ -15,6 +16,7 @@ import { CopilotEngine } from "./copilot.ts";
 import { CursorEngine } from "./cursor.ts";
 import { DroidEngine } from "./droid.ts";
 import { GeminiEngine } from "./gemini.ts";
+import { KimiEngine } from "./kimi.ts";
 import { OpenCodeEngine } from "./opencode.ts";
 import { QwenEngine } from "./qwen.ts";
 import type { AIEngine, AIEngineName } from "./types.ts";
@@ -40,6 +42,8 @@ export function createEngine(name: AIEngineName): AIEngine {
 			return new CopilotEngine();
 		case "gemini":
 			return new GeminiEngine();
+		case "kimi":
+			return new KimiEngine();
 		default:
 			throw new Error(`Unknown AI engine: ${name}`);
 	}
