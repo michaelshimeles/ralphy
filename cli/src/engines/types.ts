@@ -58,4 +58,5 @@ export type AIEngineName =
 	| "qwen"
 	| "droid"
 	| "copilot"
-	| "gemini";
+	| "gemini"
+	| "kimi";
