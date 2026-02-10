@@ -371,6 +371,13 @@ export function detectStepFromOutput(line: string): string | null {
 	try {
 		const parsed = JSON.parse(trimmed);
 
+		// Cline --json output (one object per line)
+		// https://github.com/cline/cline
+		if (parsed?.type === "say" && typeof parsed.say === "string") {
+			if (parsed.say === "tool") return "Implementing";
+			if (parsed.say === "text") return "Implementing";
+		}
+
 		// Extract specific fields for pattern matching (avoid stringifying entire object)
 		const toolName =
 			parsed.tool?.toLowerCase() ||

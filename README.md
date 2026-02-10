@@ -89,6 +89,7 @@ ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
 ralphy --gemini     # Gemini CLI
+ralphy --cline      # Cline CLI
 ```
 
 ### Model Override
@@ -115,6 +116,9 @@ ralphy --claude "add feature" -- --no-permissions-prompt
 
 # Works with any engine
 ralphy --cursor "fix bug" -- --custom-arg value
+
+# Pass cline-specific arguments
+ralphy --cline "fix bug" -- --timeout 600
 ```
 
 Everything after `--` is passed directly to the engine CLI without interpretation.
@@ -355,6 +359,7 @@ ralphy --parallel --sandbox
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `--yolo` | tokens |
 | Gemini | `gemini` | `--yolo` | tokens + cost |
+| Cline | `cline` | `-y` | JSON |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 

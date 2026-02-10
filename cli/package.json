@@ -1,7 +1,7 @@
 {
 	"name": "ralphy-cli",
 	"version": "4.7.2",
-	"description": "Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid, GitHub Copilot and Gemini CLI",
+	"description": "Autonomous AI Coding Loop - Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid, GitHub Copilot, Gemini CLI and Cline",
 	"type": "module",
 	"main": "dist/index.js",
 	"bin": {
@@ -35,6 +35,7 @@
 		"qwen",
 		"droid",
 		"copilot",
+		"cline",
 		"cli"
 	],
 	"author": "",

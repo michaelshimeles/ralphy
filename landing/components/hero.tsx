@@ -33,7 +33,7 @@ export function Hero() {
 
         <p className="text-neutral-500 mb-6">
           Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, and Factory
-          Droid. Configure project rules so the AI follows your conventions.
+          Droid, and Cline. Configure project rules so the AI follows your conventions.
         </p>
 
         <button

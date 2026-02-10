@@ -5,6 +5,7 @@ const engines = [
   { name: "Codex", flag: "--codex" },
   { name: "Qwen-Code", flag: "--qwen" },
   { name: "Factory Droid", flag: "--droid" },
+  { name: "Cline", flag: "--cline" },
 ];
 
 export function Engines() {

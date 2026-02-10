@@ -8,8 +8,10 @@ export * from "./qwen.ts";
 export * from "./droid.ts";
 export * from "./copilot.ts";
 export * from "./gemini.ts";
+export * from "./cline.ts";
 
 import { ClaudeEngine } from "./claude.ts";
+import { ClineEngine } from "./cline.ts";
 import { CodexEngine } from "./codex.ts";
 import { CopilotEngine } from "./copilot.ts";
 import { CursorEngine } from "./cursor.ts";
@@ -40,6 +42,8 @@ export function createEngine(name: AIEngineName): AIEngine {
 			return new CopilotEngine();
 		case "gemini":
 			return new GeminiEngine();
+		case "cline":
+			return new ClineEngine();
 		default:
 			throw new Error(`Unknown AI engine: ${name}`);
 	}

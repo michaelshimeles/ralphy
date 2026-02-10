@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	checkForErrors,
+	detectStepFromOutput,
 	extractAuthenticationError,
 	formatCommandError,
 	parseStreamJsonResult,
@@ -308,5 +309,17 @@ More content that would normally appear`;
 		const error = formatCommandError(1, output);
 
 		expect(error).toBe("Invalid API key · Please run /login");
+	});
+});
+
+describe("detectStepFromOutput", () => {
+	it("should detect step from Cline say:tool JSON", () => {
+		const line = '{"type":"say","text":"Running tool","ts":1,"say":"tool"}';
+		expect(detectStepFromOutput(line)).toBe("Implementing");
+	});
+
+	it("should detect step from Cline say:text JSON", () => {
+		const line = '{"type":"say","text":"Working","ts":1,"say":"text"}';
+		expect(detectStepFromOutput(line)).toBe("Implementing");
 	});
 });

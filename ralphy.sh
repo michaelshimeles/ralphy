@@ -2,7 +2,7 @@
 
 # ============================================
 # Ralphy - Autonomous AI Coding Loop
-# Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code and Factory Droid
+# Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid, GitHub Copilot and Cline
 # Runs until PRD is complete
 # ============================================
 
@@ -27,7 +27,7 @@ AUTO_COMMIT=true
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, or copilot
+AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, copilot, or cline
 MODEL_OVERRIDE=""   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
@@ -79,7 +79,7 @@ current_step="Thinking"
 total_input_tokens=0
 total_output_tokens=0
 total_actual_cost="0"  # OpenCode provides actual cost
-total_duration_ms=0    # Cursor provides duration
+total_duration_ms=0    # Cursor/Droid/Cline provide duration
 iteration=0
 retry_count=0
 declare -a parallel_pids=()
@@ -650,6 +650,12 @@ run_brownfield_task() {
         ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
         2>&1 | tee "$output_file"
       ;;
+    cline)
+      # Cline: non-interactive JSON output
+      cline -y --json \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        "$prompt" 2>&1 | tee "$output_file"
+      ;;
     codex)
       codex exec --full-auto \
         --json \
@@ -702,6 +708,7 @@ ${BOLD}AI ENGINE OPTIONS:${RESET}
   --qwen              Use Qwen-Code
   --droid             Use Factory Droid
   --copilot           Use GitHub Copilot
+  --cline             Use Cline CLI
   --model <name>      Override default model for any engine
                       Claude: sonnet, haiku, opus
                       OpenCode: gpt-4o, gpt-4o-mini, o1, o3-mini
@@ -830,6 +837,10 @@ parse_args() {
         ;;
       --copilot)
         AI_ENGINE="copilot"
+        shift
+        ;;
+      --cline)
+        AI_ENGINE="cline"
         shift
         ;;
       --model)
@@ -1034,6 +1045,13 @@ check_requirements() {
     copilot)
       if ! command -v copilot &>/dev/null; then
         log_error "GitHub Copilot CLI not found. Install with: npm install -g @github/copilot"
+        exit 1
+      fi
+      ;;
+    cline)
+      if ! command -v cline &>/dev/null; then
+        log_error "Cline CLI not found."
+        log_info "Install from: https://github.com/cline/cline"
         exit 1
       fi
       ;;
@@ -1466,6 +1484,9 @@ monitor_progress() {
         current_step="Writing tests"
       elif echo "$content" | grep -qE '"tool":"[Ww]rite"|"tool":"[Ee]dit"|"name":"write"|"name":"edit"'; then
         current_step="Implementing"
+      elif echo "$content" | grep -qE '"type":"say".*"say":"(tool|text)"'; then
+        # Cline JSON output
+        current_step="Implementing"
       elif echo "$content" | grep -qE '"tool":"[Rr]ead"|"tool":"[Gg]lob"|"tool":"[Gg]rep"|"name":"read"|"name":"glob"|"name":"grep"'; then
         current_step="Reading code"
       fi
@@ -1675,6 +1696,11 @@ run_ai_command() {
   local prompt=$1
   local output_file=$2
 
+  # Coarse duration tracking (seconds precision; used for engines that don't report tokens)
+  local start_s
+  start_s=$(date +%s)
+  export RALPHY_AI_START_S="$start_s"
+
   case "$AI_ENGINE" in
     opencode)
       # OpenCode: use 'run' command with JSON format and permissive settings
@@ -1707,6 +1733,12 @@ run_ai_command() {
         ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
         > "$output_file" 2>&1 &
       ;;
+    cline)
+      # Cline: use non-interactive JSON output
+      cline -y --json \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        "$prompt" > "$output_file" 2>&1 &
+      ;;
     codex)
       CODEX_LAST_MESSAGE_FILE="${output_file}.last"
       rm -f "$CODEX_LAST_MESSAGE_FILE"
@@ -1734,6 +1766,14 @@ parse_ai_result() {
   local input_tokens=0
   local output_tokens=0
   local actual_cost="0"
+
+  # Duration fallback (seconds precision)
+  local now_s elapsed_ms
+  now_s=$(date +%s)
+  elapsed_ms=0
+  if [[ -n "${RALPHY_AI_START_S:-}" ]] && [[ "${RALPHY_AI_START_S:-}" =~ ^[0-9]+$ ]]; then
+    elapsed_ms=$(( (now_s - RALPHY_AI_START_S) * 1000 ))
+  fi
 
   case "$AI_ENGINE" in
     opencode)
@@ -1795,14 +1835,26 @@ parse_ai_result() {
       # These patterns match Copilot CLI's interactive elements and status messages
       local filtered_output
       filtered_output=$(echo "$result" | grep -v "^\?" | grep -v "^❯" | grep -v "Thinking..." | grep -v "Working on it..." | sed '/^$/d')
-      
+
       # Extract response from filtered output
       # Get last 10 lines from first 20 to capture the main response while filtering preamble
       response=$(echo "$filtered_output" | head -20 | tail -10 || echo "Task completed")
-      
+
       # Tokens remain 0 for Copilot (not available in programmatic mode)
       input_tokens=0
       output_tokens=0
+      ;;
+    cline)
+      # Cline --json output: one JSON object per line.
+      # Prefer the last non-partial say:text message.
+      response=$(echo "$result" | jq -r 'select(.type=="say" and ((.say=="text") or (.say|not)) and (.partial|not)) | .text' 2>/dev/null | tail -1)
+      [[ -z "$response" ]] && response="Task completed"
+
+      input_tokens=0
+      output_tokens=0
+      if [[ "$elapsed_ms" -gt 0 ]]; then
+        actual_cost="duration:$elapsed_ms"
+      fi
       ;;
     qwen)
       # Qwen-Code stream-json parsing (similar to Claude Code)
@@ -2238,6 +2290,10 @@ Focus only on implementing: $task_name"
   local retry=0
 
   while [[ $retry -lt $MAX_RETRIES ]]; do
+    # Coarse duration tracking for engines that don't report it (e.g. cline)
+    RALPHY_AI_START_S=$(date +%s)
+    export RALPHY_AI_START_S
+
     case "$AI_ENGINE" in
       opencode)
         (
@@ -2277,6 +2333,14 @@ Focus only on implementing: $task_name"
           cd "$worktree_dir"
           copilot -p "$prompt" \
             ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"}
+        ) > "$tmpfile" 2>>"$log_file"
+        ;;
+      cline)
+        (
+          cd "$worktree_dir"
+          cline -y --json \
+            ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+            "$prompt"
         ) > "$tmpfile" 2>>"$log_file"
         ;;
       codex)
@@ -2876,6 +2940,11 @@ Be careful to preserve functionality from BOTH branches. The goal is to integrat
                 ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
                 > "$resolve_tmpfile" 2>&1
               ;;
+            cline)
+              cline -y --json \
+                ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+                "$resolve_prompt" > "$resolve_tmpfile" 2>&1
+              ;;
             codex)
               codex exec --full-auto \
                 --json \
@@ -2938,8 +3007,8 @@ show_summary() {
   echo ""
   echo "${BOLD}>>> Cost Summary${RESET}"
 
-  # Cursor, Droid, and Copilot don't provide token usage, but do provide duration
-  if [[ "$AI_ENGINE" == "cursor" ]] || [[ "$AI_ENGINE" == "droid" ]] || [[ "$AI_ENGINE" == "copilot" ]]; then
+  # Cursor, Droid, Copilot, and Cline don't provide token usage, but do provide duration
+  if [[ "$AI_ENGINE" == "cursor" ]] || [[ "$AI_ENGINE" == "droid" ]] || [[ "$AI_ENGINE" == "copilot" ]] || [[ "$AI_ENGINE" == "cline" ]]; then
     echo "${DIM}Token usage not available (CLI doesn't expose this data)${RESET}"
     if [[ "$total_duration_ms" -gt 0 ]]; then
       local dur_sec=$((total_duration_ms / 1000))
@@ -3031,6 +3100,7 @@ main() {
       qwen) command -v qwen &>/dev/null || { log_error "Qwen-Code CLI not found"; exit 1; } ;;
       droid) command -v droid &>/dev/null || { log_error "Factory Droid CLI not found"; exit 1; } ;;
       copilot) command -v copilot &>/dev/null || { log_error "GitHub Copilot CLI not found"; exit 1; } ;;
+      cline) command -v cline &>/dev/null || { log_error "Cline CLI not found"; exit 1; } ;;
     esac
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -3049,6 +3119,7 @@ main() {
       qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
       droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
       copilot) engine_display="${BLUE}GitHub Copilot${RESET}" ;;
+      cline) engine_display="${CYAN}Cline${RESET}" ;;
       *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
     esac
     echo "Engine: $engine_display"
@@ -3085,6 +3156,7 @@ main() {
     qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
     droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
     copilot) engine_display="${BLUE}GitHub Copilot${RESET}" ;;
+    cline) engine_display="${CYAN}Cline${RESET}" ;;
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
