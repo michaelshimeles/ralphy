@@ -181,6 +181,12 @@ ralphy --github owner/repo
 ralphy --github owner/repo --github-label "ready"
 ```
 
+**Gitea Issues (via `tea`)**:
+```bash
+ralphy --gitea owner/repo
+ralphy --gitea owner/repo --gitea-label "ready"
+```
+
 ## Parallel Execution
 
 ```bash
@@ -300,7 +306,9 @@ ralphy --parallel --sandbox
 | `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
-| `--sync-issue N` | sync PRD progress to GitHub issue #N |
+| `--gitea REPO` | use Gitea issues (requires `tea`) |
+| `--gitea-label TAG` | filter Gitea issues by label |
+| `--sync-issue N` | sync PRD progress to issue #N (GitHub or Gitea, based on task source) |
 | `--model NAME` | override model for any engine |
 | `--sonnet` | shortcut for `--claude --model sonnet` |
 | `--parallel` | run parallel |
@@ -341,6 +349,7 @@ ralphy --parallel --sandbox
 
 **Both versions:**
 - `gh` (optional, for GitHub issues / `--create-pr`)
+- `tea` (optional, for Gitea issues / `--create-pr`)
 - [agent-browser](https://agent-browser.dev) (optional, for `--browser`)
 
 ## Engine Details
@@ -377,7 +386,7 @@ When an engine exits non-zero, ralphy includes the last lines of CLI output in t
 
 ### v4.6.0
 - **Gemini CLI support**: new `--gemini` engine option for Google Gemini CLI
-- **GitHub issue sync**: `--sync-issue <number>` syncs PRD progress to a GitHub issue after each task
+- **Issue sync**: `--sync-issue <number>` syncs PRD progress to an issue after each task (GitHub or Gitea)
 - **performance improvements**: reduced redundant file reads, exponential backoff for retries, non-blocking logging, operation timing visibility
 - **version fix**: CLI version now reads dynamically from package.json
 

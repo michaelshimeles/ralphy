@@ -92,7 +92,7 @@ export interface RuntimeOptions {
 	/** Maximum parallel agents */
 	maxParallel: number;
 	/** PRD source type */
-	prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github";
+	prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github" | "gitea";
 	/** PRD file or folder path */
 	prdFile: string;
 	/** Whether PRD path is a folder */
@@ -101,7 +101,11 @@ export interface RuntimeOptions {
 	githubRepo: string;
 	/** GitHub issue label filter */
 	githubLabel: string;
-	/** GitHub issue number to sync PRD with on each iteration */
+	/** Gitea repo identifier for tea-backed issues (passed through to tea --repo) */
+	giteaRepo: string;
+	/** Optional label filter for Gitea issues (maps to tea issues --labels) */
+	giteaLabel: string;
+	/** Issue number to sync PRD with on each iteration (GitHub or Gitea, based on task source) */
 	syncIssue?: number;
 	/** Auto-commit changes */
 	autoCommit: boolean;
@@ -140,6 +144,8 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	prdIsFolder: false,
 	githubRepo: "",
 	githubLabel: "",
+	giteaRepo: "",
+	giteaLabel: "",
 	autoCommit: true,
 	browserEnabled: "auto",
 };

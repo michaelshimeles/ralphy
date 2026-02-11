@@ -19,6 +19,7 @@ import {
 	createAgentWorktree,
 	getWorktreeBase,
 } from "../git/worktree.ts";
+import { syncPrdToGiteaIssue } from "../gitea/issue-sync.ts";
 import type { Task, TaskSource } from "../tasks/types.ts";
 import { formatDuration, logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
@@ -604,7 +605,13 @@ export async function runParallel(
 		// Sync PRD to GitHub issue once per batch (after all tasks processed)
 		// This prevents multiple concurrent syncs and reduces API calls
 		if (syncIssue && prdFile && result.tasksCompleted > 0) {
-			await syncPrdToIssue(prdFile, syncIssue, workDir);
+			if (prdSource === "gitea") {
+				await syncPrdToGiteaIssue(prdFile, syncIssue, workDir, {
+					repo: options.giteaRepo,
+				});
+			} else {
+				await syncPrdToIssue(prdFile, syncIssue, workDir);
+			}
 		}
 
 		// Log batch completion time

@@ -169,6 +169,12 @@ ralphy --github owner/repo
 ralphy --github owner/repo --github-label "ready"
 ```
 
+**Gitea Issues (via `tea`)**:
+```bash
+ralphy --gitea owner/repo
+ralphy --gitea owner/repo --gitea-label "ready"
+```
+
 ## Parallel Execution
 
 ```bash
@@ -288,7 +294,9 @@ ralphy --parallel --sandbox
 | `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
-| `--sync-issue N` | sync PRD progress to GitHub issue #N |
+| `--gitea REPO` | use Gitea issues (requires `tea`) |
+| `--gitea-label TAG` | filter Gitea issues by label |
+| `--sync-issue N` | sync PRD progress to issue #N (GitHub or Gitea, based on task source) |
 | `--model NAME` | override model for any engine |
 | `--sonnet` | shortcut for `--claude --model sonnet` |
 | `--parallel` | run parallel |
@@ -329,6 +337,7 @@ ralphy --parallel --sandbox
 
 **Both versions:**
 - `gh` (optional, for GitHub issues / `--create-pr`)
+- `tea` (optional, for Gitea issues / `--create-pr`)
 - [agent-browser](https://agent-browser.dev) (optional, for `--browser`)
 
 ## Engine Details

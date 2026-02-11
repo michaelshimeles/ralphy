@@ -49,7 +49,12 @@ export function createProgram(): Command {
 		.option("--json <file>", "JSON task file")
 		.option("--github <repo>", "GitHub repo for issues (owner/repo)")
 		.option("--github-label <label>", "Filter GitHub issues by label")
-		.option("--sync-issue <number>", "Sync PRD file to GitHub issue body on each iteration")
+		.option("--gitea <repo>", "Gitea repo for issues (passed to tea --repo)")
+		.option("--gitea-label <label>", "Filter Gitea issues by label (passed to tea issues --labels)")
+		.option(
+			"--sync-issue <number>",
+			"Sync PRD file to issue body on each iteration (GitHub or Gitea, based on task source)",
+		)
 		.option("--no-commit", "Don't auto-commit changes")
 		.option("--browser", "Enable browser automation (agent-browser)")
 		.option("--no-browser", "Disable browser automation")
@@ -103,7 +108,7 @@ export function parseArgs(args: string[]): {
 	const modelOverride = opts.sonnet ? "sonnet" : opts.model || undefined;
 
 	// Determine PRD source with auto-detection for file vs folder
-	let prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github" = "markdown";
+	let prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github" | "gitea" = "markdown";
 	let prdFile = opts.prd || "PRD.md";
 	let prdIsFolder = false;
 
@@ -115,6 +120,8 @@ export function parseArgs(args: string[]): {
 		prdFile = opts.yaml;
 	} else if (opts.github) {
 		prdSource = "github";
+	} else if (opts.gitea) {
+		prdSource = "gitea";
 	} else {
 		// Auto-detect if PRD path is a file or folder
 		if (existsSync(prdFile)) {
@@ -152,6 +159,8 @@ export function parseArgs(args: string[]): {
 		prdIsFolder,
 		githubRepo: opts.github || "",
 		githubLabel: opts.githubLabel || "",
+		giteaRepo: opts.gitea || "",
+		giteaLabel: opts.giteaLabel || "",
 		syncIssue: opts.syncIssue ? Number.parseInt(opts.syncIssue, 10) || undefined : undefined,
 		autoCommit: opts.commit !== false,
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",

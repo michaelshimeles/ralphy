@@ -55,6 +55,11 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		process.exit(1);
 	}
 
+	if (options.prdSource === "gitea" && !options.giteaRepo) {
+		logError("Gitea repository not specified. Use --gitea <repo>");
+		process.exit(1);
+	}
+
 	// Check engine availability
 	const engine = createEngine(options.aiEngine as AIEngineName);
 	const available = await isEngineAvailable(options.aiEngine as AIEngineName);
@@ -69,8 +74,8 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	const innerTaskSource = createTaskSource({
 		type: options.prdSource,
 		filePath: options.prdFile,
-		repo: options.githubRepo,
-		label: options.githubLabel,
+		repo: options.prdSource === "github" ? options.githubRepo : options.giteaRepo,
+		label: options.prdSource === "github" ? options.githubLabel : options.giteaLabel,
 	});
 	const taskSource = new CachedTaskSource(innerTaskSource);
 
@@ -139,6 +144,8 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
 			syncIssue: options.syncIssue,
+			// Provider routing context
+			giteaRepo: options.giteaRepo,
 		});
 	} else {
 		result = await runSequential({
@@ -163,6 +170,8 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
 			syncIssue: options.syncIssue,
+			prdSource: options.prdSource,
+			giteaRepo: options.giteaRepo,
 		});
 	}
 

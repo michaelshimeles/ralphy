@@ -4,8 +4,10 @@ export * from "./markdown-folder.ts";
 export * from "./yaml.ts";
 export * from "./json.ts";
 export * from "./github.ts";
+export * from "./gitea.ts";
 export * from "./cached-task-source.ts";
 
+import { GiteaTaskSource } from "./gitea.ts";
 import { GitHubTaskSource } from "./github.ts";
 import { JsonTaskSource } from "./json.ts";
 import { MarkdownFolderTaskSource } from "./markdown-folder.ts";
@@ -57,6 +59,12 @@ export function createTaskSource(options: TaskSourceOptions): TaskSource {
 				throw new Error("repo is required for github task source");
 			}
 			return new GitHubTaskSource(options.repo, options.label);
+
+		case "gitea":
+			if (!options.repo) {
+				throw new Error("repo is required for gitea task source");
+			}
+			return new GiteaTaskSource(options.repo, options.label);
 
 		default:
 			throw new Error(`Unknown task source type: ${options.type}`);

@@ -46,11 +46,13 @@ PARALLEL=false
 MAX_PARALLEL=3
 
 # PRD source options
-PRD_SOURCE="markdown"  # markdown, yaml, github
+PRD_SOURCE="markdown"  # markdown, yaml, github, gitea
 PRD_FILE="PRD.md"
 GITHUB_REPO=""
 GITHUB_LABEL=""
-SYNC_ISSUE=""  # GitHub issue number to sync PRD with
+GITEA_REPO=""
+GITEA_LABEL=""
+SYNC_ISSUE=""  # Issue number to sync PRD with (GitHub/Gitea depending on source)
 
 # Browser automation (agent-browser)
 BROWSER_ENABLED="auto"  # auto, true, false
@@ -725,7 +727,8 @@ ${BOLD}PARALLEL EXECUTION:${RESET}
 ${BOLD}GIT BRANCH OPTIONS:${RESET}
   --branch-per-task   Create a new git branch for each task
   --base-branch NAME  Base branch to create task branches from (default: current)
-  --create-pr         Create a pull request after each task (requires gh CLI)
+  --create-pr         Create a pull request after each task
+                    (requires gh for --github, tea for --gitea)
   --draft-pr          Create PRs as drafts
 
 ${BOLD}PRD SOURCE OPTIONS:${RESET}
@@ -733,7 +736,9 @@ ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --yaml FILE         Use YAML task file instead of markdown
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
-  --sync-issue NUM    Sync PRD file to GitHub issue body on each iteration
+  --gitea REPO        Fetch tasks from Gitea issues via tea (passed to: tea --repo)
+  --gitea-label TAG   Filter Gitea issues by label (passed to: tea issues --labels)
+  --sync-issue NUM    Sync PRD file to issue body on each iteration (GitHub/Gitea)
 
 ${BOLD}CAPABILITIES:${RESET}
   --browser           Enable browser automation (requires agent-browser)
@@ -758,6 +763,7 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
   ./ralphy.sh --yaml tasks.yaml            # Use YAML task file
   ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
+  ./ralphy.sh --gitea org/repo             # Fetch from Gitea issues (tea)
 
 ${BOLD}PRD FORMATS:${RESET}
   Markdown (PRD.md):
@@ -771,6 +777,9 @@ ${BOLD}PRD FORMATS:${RESET}
 
   GitHub Issues:
     Uses open issues from the specified repository
+
+  Gitea Issues:
+    Uses open issues from the specified repository (requires tea CLI)
 
 EOF
 }
@@ -895,6 +904,15 @@ parse_args() {
         GITHUB_LABEL="${2:-}"
         shift 2
         ;;
+      --gitea)
+        GITEA_REPO="${2:-}"
+        PRD_SOURCE="gitea"
+        shift 2
+        ;;
+      --gitea-label)
+        GITEA_LABEL="${2:-}"
+        shift 2
+        ;;
       --sync-issue)
         SYNC_ISSUE="${2:-}"
         shift 2
@@ -993,6 +1011,21 @@ check_requirements() {
         exit 1
       fi
       ;;
+    gitea)
+      if [[ -z "$GITEA_REPO" ]]; then
+        log_error "Gitea repository not specified. Use --gitea org/repo"
+        exit 1
+      fi
+      if ! command -v tea &>/dev/null; then
+        log_error "Gitea tea CLI (tea) is required. Install from: https://gitea.com/gitea/tea"
+        exit 1
+      fi
+      # Best-effort auth check
+      if ! tea whoami >/dev/null 2>&1; then
+        log_error "tea CLI is not authenticated. Run 'tea login' or configure tea before using --gitea."
+        exit 1
+      fi
+      ;;
   esac
 
   # Check for AI CLI
@@ -1068,10 +1101,19 @@ check_requirements() {
     exit 1
   fi
 
-  # Check for gh if PR creation is requested
-  if [[ "$CREATE_PR" == true ]] && ! command -v gh &>/dev/null; then
-    log_error "GitHub CLI (gh) is required for --create-pr. Install from https://cli.github.com/"
-    exit 1
+  # Check for PR creation dependency
+  if [[ "$CREATE_PR" == true ]]; then
+    if [[ "$PRD_SOURCE" == "gitea" ]]; then
+      if ! command -v tea &>/dev/null; then
+        log_error "tea CLI (tea) is required for --create-pr with --gitea. Install tea first."
+        exit 1
+      fi
+    else
+      if ! command -v gh &>/dev/null; then
+        log_error "GitHub CLI (gh) is required for --create-pr. Install from https://cli.github.com/"
+        exit 1
+      fi
+    fi
   fi
 
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -1284,6 +1326,63 @@ get_github_issue_body() {
 }
 
 # ============================================
+# TASK SOURCES - GITEA ISSUES
+# ============================================
+
+get_tasks_gitea() {
+  local args=(issues list --state open --output json --fields index,title)
+  [[ -n "$GITEA_LABEL" ]] && args+=(--labels "$GITEA_LABEL")
+  args+=(--repo "$GITEA_REPO")
+
+  tea "${args[@]}" \
+    | jq -r '.[] | "\(.index):\(.title)"' 2>/dev/null || true
+}
+
+get_next_task_gitea() {
+  local args=(issues list --state open --output json --fields index,title)
+  [[ -n "$GITEA_LABEL" ]] && args+=(--labels "$GITEA_LABEL")
+  args+=(--repo "$GITEA_REPO")
+
+  tea "${args[@]}" \
+    | jq -r '.[0] | "\(.index):\(.title)"' 2>/dev/null | cut -c1-50 || echo ""
+}
+
+count_remaining_gitea() {
+  local args=(issues list --state open --output json --fields index,title)
+  [[ -n "$GITEA_LABEL" ]] && args+=(--labels "$GITEA_LABEL")
+  args+=(--repo "$GITEA_REPO")
+
+  tea "${args[@]}" \
+    | jq -r 'length' 2>/dev/null || echo "0"
+}
+
+count_completed_gitea() {
+  # NOTE: include title to keep JSON parsing consistent with modern TS implementation.
+  local args=(issues list --state closed --output json --fields index,title)
+  [[ -n "$GITEA_LABEL" ]] && args+=(--labels "$GITEA_LABEL")
+  args+=(--repo "$GITEA_REPO")
+
+  tea "${args[@]}" \
+    | jq -r 'length' 2>/dev/null || echo "0"
+}
+
+mark_task_complete_gitea() {
+  local task=$1
+  local issue_num="${task%%:*}"
+  tea issues close "$issue_num" --repo "$GITEA_REPO" 2>/dev/null || true
+}
+
+get_gitea_issue_body() {
+  local task=$1
+  local issue_num="${task%%:*}"
+
+  # Tea shows issue details when called as: `tea issues <index>`.
+  # Output shape differs by tea versions, so we parse both object and array forms.
+  tea issues "$issue_num" --output json --fields body --repo "$GITEA_REPO" 2>/dev/null \
+    | jq -r '.body // (.[0].body // "")' 2>/dev/null || echo ""
+}
+
+# ============================================
 # UNIFIED TASK INTERFACE
 # ============================================
 
@@ -1292,6 +1391,7 @@ get_next_task() {
     markdown) get_next_task_markdown ;;
     yaml) get_next_task_yaml ;;
     github) get_next_task_github ;;
+    gitea) get_next_task_gitea ;;
   esac
 }
 
@@ -1300,6 +1400,7 @@ get_all_tasks() {
     markdown) get_tasks_markdown ;;
     yaml) get_tasks_yaml ;;
     github) get_tasks_github ;;
+    gitea) get_tasks_gitea ;;
   esac
 }
 
@@ -1308,6 +1409,7 @@ count_remaining_tasks() {
     markdown) count_remaining_markdown ;;
     yaml) count_remaining_yaml ;;
     github) count_remaining_github ;;
+    gitea) count_remaining_gitea ;;
   esac
 }
 
@@ -1316,6 +1418,7 @@ count_completed_tasks() {
     markdown) count_completed_markdown ;;
     yaml) count_completed_yaml ;;
     github) count_completed_github ;;
+    gitea) count_completed_gitea ;;
   esac
 }
 
@@ -1325,10 +1428,11 @@ mark_task_complete() {
     markdown) mark_task_complete_markdown "$task" ;;
     yaml) mark_task_complete_yaml "$task" ;;
     github) mark_task_complete_github "$task" ;;
+    gitea) mark_task_complete_gitea "$task" ;;
   esac
 }
 
-# Sync PRD file to GitHub issue body
+# Sync PRD file to issue body (GitHub/Gitea)
 sync_prd_to_issue() {
   if [[ -z "$SYNC_ISSUE" ]]; then
     return 0
@@ -1339,17 +1443,35 @@ sync_prd_to_issue() {
     return 1
   fi
 
-  if ! command -v gh &>/dev/null; then
-    log_warn "Cannot sync: gh CLI not installed"
-    return 1
-  fi
-
-  log_debug "Syncing $PRD_FILE to issue #$SYNC_ISSUE"
-  if gh issue edit "$SYNC_ISSUE" --body "$(cat "$PRD_FILE")" 2>/dev/null; then
-    log_success "Synced PRD → GitHub issue #$SYNC_ISSUE"
-  else
-    log_warn "Failed to sync PRD to issue #$SYNC_ISSUE"
-  fi
+  case "$PRD_SOURCE" in
+    github)
+      if ! command -v gh &>/dev/null; then
+        log_warn "Cannot sync: gh CLI not installed"
+        return 1
+      fi
+      log_debug "Syncing $PRD_FILE to GitHub issue #$SYNC_ISSUE"
+      if gh issue edit "$SYNC_ISSUE" --repo "$GITHUB_REPO" --body "$(cat "$PRD_FILE")" 2>/dev/null; then
+        log_success "Synced PRD → GitHub issue #$SYNC_ISSUE"
+      else
+        log_warn "Failed to sync PRD to GitHub issue #$SYNC_ISSUE"
+      fi
+      ;;
+    gitea)
+      if ! command -v tea &>/dev/null; then
+        log_warn "Cannot sync: tea CLI not installed"
+        return 1
+      fi
+      log_debug "Syncing $PRD_FILE to Gitea issue #$SYNC_ISSUE"
+      if tea issues edit "$SYNC_ISSUE" --description "$(cat "$PRD_FILE")" --repo "$GITEA_REPO" 2>/dev/null; then
+        log_success "Synced PRD → Gitea issue #$SYNC_ISSUE"
+      else
+        log_warn "Failed to sync PRD to Gitea issue #$SYNC_ISSUE"
+      fi
+      ;;
+    *)
+      log_warn "Sync requested, but PRD source '$PRD_SOURCE' doesn't support --sync-issue"
+      ;;
+  esac
 }
 
 # ============================================
@@ -1388,7 +1510,7 @@ create_task_branch() {
   echo "$branch_name"
 }
 
-create_pull_request() {
+create_pull_request_github() {
   local branch=$1
   local task=$2
   local body="${3:-Automated PR created by Ralphy}"
@@ -1418,6 +1540,51 @@ create_pull_request() {
 
   log_success "PR created: $pr_url"
   echo "$pr_url"
+}
+
+create_pull_request_gitea() {
+  local branch=$1
+  local task=$2
+  local body="${3:-Automated PR created by Ralphy}"
+
+  log_info "Creating pull request for $branch..."
+
+  # Push branch first
+  git push -u origin "$branch" 2>/dev/null || {
+    log_warn "Failed to push branch $branch"
+    return 1
+  }
+
+  # Create PR
+  # NOTE: tea versions differ in supported output formats; do best-effort URL extraction.
+  local pr_out pr_url
+  pr_out=$(tea pulls create \
+    --base "$BASE_BRANCH" \
+    --head "$branch" \
+    --title "$task" \
+    --description "$body" \
+    --repo "$GITEA_REPO" 2>/dev/null) || true
+
+  pr_url=$(printf '%s' "$pr_out" | grep -Eo 'https?://[^ ]+' | head -1 || true)
+
+  if [[ -z "$pr_url" ]]; then
+    log_warn "Failed to create PR for $branch"
+    return 1
+  fi
+
+  log_success "PR created: $pr_url"
+  echo "$pr_url"
+}
+
+create_pull_request() {
+  local branch=$1
+  local task=$2
+  local body="${3:-Automated PR created by Ralphy}"
+
+  case "$PRD_SOURCE" in
+    gitea) create_pull_request_gitea "$branch" "$task" "$body" ;;
+    *) create_pull_request_github "$branch" "$task" "$body" ;;
+  esac
 }
 
 return_to_base_branch() {
@@ -1611,6 +1778,19 @@ $issue_body
 
 @$PROGRESS_FILE"
       ;;
+    gitea)
+      # For Gitea issues, we include the issue body
+      local issue_body=""
+      if [[ -n "$task_override" ]]; then
+        issue_body=$(get_gitea_issue_body "$task_override")
+      fi
+      prompt="Task from Gitea Issue: $task_override
+
+Issue Description:
+$issue_body
+
+@$PROGRESS_FILE"
+      ;;
   esac
 
   prompt="$prompt
@@ -1644,6 +1824,10 @@ $step. Update ${PRD_FILE} to mark the task as completed (set completed: true)."
     github)
       prompt="$prompt
 $step. The task will be marked complete automatically. Just note the completion in $PROGRESS_FILE."
+      ;;
+    gitea)
+      prompt="$prompt
+$step. The task will be marked complete automatically (Gitea issue will be closed). Just note the completion in $PROGRESS_FILE."
       ;;
   esac
 
@@ -1795,11 +1979,11 @@ parse_ai_result() {
       # These patterns match Copilot CLI's interactive elements and status messages
       local filtered_output
       filtered_output=$(echo "$result" | grep -v "^\?" | grep -v "^❯" | grep -v "Thinking..." | grep -v "Working on it..." | sed '/^$/d')
-      
+
       # Extract response from filtered output
       # Get last 10 lines from first 20 to capture the main response while filtering preamble
       response=$(echo "$filtered_output" | head -20 | tail -10 || echo "Task completed")
-      
+
       # Tokens remain 0 for Copilot (not available in programmatic mode)
       input_tokens=0
       output_tokens=0
@@ -2069,12 +2253,12 @@ run_single_task() {
       CODEX_LAST_MESSAGE_FILE=""
     fi
 
-    # Mark task complete for GitHub issues (since AI can't do it)
-    if [[ "$PRD_SOURCE" == "github" ]]; then
+    # Mark task complete for GitHub/Gitea issues (since AI can't do it)
+    if [[ "$PRD_SOURCE" == "github" ]] || [[ "$PRD_SOURCE" == "gitea" ]]; then
       mark_task_complete "$current_task"
     fi
 
-    # Sync PRD to GitHub issue if configured
+    # Sync PRD to issue (GitHub/Gitea) if configured
     sync_prd_to_issue
 
     # Create PR if requested
@@ -2353,12 +2537,22 @@ Focus only on implementing: $task_name"
       (
         cd "$worktree_dir"
         git push -u origin "$branch_name" 2>>"$log_file" || true
-        gh pr create \
-          --base "$BASE_BRANCH" \
-          --head "$branch_name" \
-          --title "$task_name" \
-          --body "Automated implementation by Ralphy (Agent $agent_num)" \
-          ${PR_DRAFT:+--draft} 2>>"$log_file" || true
+
+        if [[ "$PRD_SOURCE" == "gitea" ]]; then
+          tea pulls create \
+            --base "$BASE_BRANCH" \
+            --head "$branch_name" \
+            --title "$task_name" \
+            --description "Automated implementation by Ralphy (Agent $agent_num)" \
+            --repo "$GITEA_REPO" 2>>"$log_file" || true
+        else
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$branch_name" \
+            --title "$task_name" \
+            --body "Automated implementation by Ralphy (Agent $agent_num)" \
+            ${PR_DRAFT:+--draft} 2>>"$log_file" || true
+        fi
       )
     fi
 
@@ -2419,6 +2613,7 @@ run_parallel_tasks() {
 
   # Export variables needed by subshell agents
   export AI_ENGINE MAX_RETRIES RETRY_DELAY PRD_SOURCE PRD_FILE CREATE_PR PR_DRAFT
+  export GITEA_REPO
 
   local batch_num=0
   local completed_branches=()
@@ -2599,6 +2794,8 @@ run_parallel_tasks() {
               mark_task_complete_yaml "$task"
             elif [[ "$PRD_SOURCE" == "github" ]]; then
               mark_task_complete_github "$task"
+            elif [[ "$PRD_SOURCE" == "gitea" ]]; then
+              mark_task_complete_gitea "$task"
             fi
             ;;
           failed)
@@ -3088,7 +3285,13 @@ main() {
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"
-  echo "Source: ${CYAN}$PRD_SOURCE${RESET} (${PRD_FILE:-$GITHUB_REPO})"
+  local source_target=""
+  case "$PRD_SOURCE" in
+    github) source_target="$GITHUB_REPO" ;;
+    gitea) source_target="$GITEA_REPO" ;;
+    *) source_target="$PRD_FILE" ;;
+  esac
+  echo "Source: ${CYAN}$PRD_SOURCE${RESET} ($source_target)"
   if [[ -d "$RALPHY_DIR" ]]; then
     echo "Config: ${GREEN}$RALPHY_DIR/${RESET} (rules loaded)"
   fi

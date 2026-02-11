@@ -3,7 +3,9 @@ import type { AIEngine, AIResult } from "../engines/types.ts";
 import { createTaskBranch, returnToBaseBranch } from "../git/branch.ts";
 import { syncPrdToIssue } from "../git/issue-sync.ts";
 import { createPullRequest } from "../git/pr.ts";
-import type { Task, TaskSource } from "../tasks/types.ts";
+import { syncPrdToGiteaIssue } from "../gitea/issue-sync.ts";
+import { createGiteaPullRequestWithTea } from "../gitea/pr.ts";
+import type { TaskSource } from "../tasks/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
 import { ProgressSpinner } from "../ui/spinner.ts";
@@ -40,6 +42,10 @@ export interface ExecutionOptions {
 	engineArgs?: string[];
 	/** GitHub issue number to sync PRD with on each iteration */
 	syncIssue?: number;
+	/** Gitea repo (passed to tea --repo) */
+	giteaRepo?: string;
+	/** Provider selection for routing issue sync / PR create */
+	prdSource?: string;
 }
 
 export interface ExecutionResult {
@@ -73,6 +79,8 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		modelOverride,
 		engineArgs,
 		syncIssue,
+		giteaRepo,
+		prdSource,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -180,9 +188,15 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 					logTaskProgress(task.title, "completed", workDir);
 					result.tasksCompleted++;
 
-					// Sync PRD to GitHub issue if configured
+					// Sync PRD to issue if configured
 					if (syncIssue && options.prdFile) {
-						await syncPrdToIssue(options.prdFile, syncIssue, workDir);
+						if (prdSource === "gitea") {
+							await syncPrdToGiteaIssue(options.prdFile, syncIssue, workDir, {
+								repo: giteaRepo,
+							});
+						} else {
+							await syncPrdToIssue(options.prdFile, syncIssue, workDir);
+						}
 					}
 
 					notifyTaskComplete(task.title);
@@ -190,14 +204,19 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 
 					// Create PR if needed
 					if (createPr && branch && baseBranch) {
-						const prUrl = await createPullRequest(
-							branch,
-							baseBranch,
-							task.title,
-							`Automated PR created by Ralphy\n\n${aiResult.response}`,
-							draftPr,
-							workDir,
-						);
+						const prBody = `Automated PR created by Ralphy\n\n${aiResult.response}`;
+						const prUrl =
+							prdSource === "gitea"
+								? await createGiteaPullRequestWithTea({
+										branch,
+										baseBranch,
+										title: task.title,
+										body: prBody,
+										draft: draftPr,
+										workDir,
+										repo: giteaRepo,
+									})
+								: await createPullRequest(branch, baseBranch, task.title, prBody, draftPr, workDir);
 
 						if (prUrl) {
 							logSuccess(`PR created: ${prUrl}`);
