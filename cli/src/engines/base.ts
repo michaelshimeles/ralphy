@@ -1,9 +1,24 @@
 import { spawn, spawnSync } from "node:child_process";
 import type { AIEngine, AIResult, EngineOptions, ProgressCallback } from "./types.ts";
+import { logDebug } from "../ui/logger.js";
 
 // Check if running in Bun
 const isBun = typeof Bun !== "undefined";
 const isWindows = process.platform === "win32";
+
+/**
+ * Format command for logging
+ */
+function formatCommand(command: string, args: string[]): string {
+	const joinedArgs = args.map((arg) => {
+		// Quote arguments with spaces or special characters
+		if (arg.includes(" ") || arg.includes("&") || arg.includes("|")) {
+			return `"${arg.replace(/"/g, '\\"')}"`;
+		}
+		return arg;
+	});
+	return `${command} ${joinedArgs.join(" ")}`;
+}
 
 /**
  * Check if a command is available in PATH
@@ -38,6 +53,9 @@ export async function execCommand(
 	env?: Record<string, string>,
 	stdinContent?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+	// Log the command being executed
+	logDebug(`$ ${formatCommand(command, args)}`);
+
 	if (isBun) {
 		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
 		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
@@ -61,6 +79,7 @@ export async function execCommand(
 			proc.exited,
 		]);
 
+		logCommandOutput(stdout, stderr);
 		return { stdout, stderr, exitCode };
 	}
 
@@ -91,6 +110,7 @@ export async function execCommand(
 		});
 
 		proc.on("close", (exitCode) => {
+			logCommandOutput(stdout, stderr);
 			resolve({ stdout, stderr, exitCode: exitCode ?? 1 });
 		});
 
@@ -208,6 +228,35 @@ function isAuthenticationMessage(messageLower: string): boolean {
 }
 
 /**
+ * Format and log command output (truncated if too long)
+ */
+function logCommandOutput(stdout: string, stderr: string): void {
+	const maxLines = 50;
+
+	// Log stdout
+	if (stdout.trim()) {
+		const lines = stdout.split("\n");
+		const displayed = lines.slice(0, maxLines).join("\n");
+		if (lines.length > maxLines) {
+			logDebug(`[stdout] ${displayed}\n... (${lines.length - maxLines} more lines)`);
+		} else {
+			logDebug(`[stdout] ${displayed}`);
+		}
+	}
+
+	// Log stderr
+	if (stderr.trim()) {
+		const lines = stderr.split("\n");
+		const displayed = lines.slice(0, maxLines).join("\n");
+		if (lines.length > maxLines) {
+			logDebug(`[stderr] ${displayed}\n... (${lines.length - maxLines} more lines)`);
+		} else {
+			logDebug(`[stderr] ${displayed}`);
+		}
+	}
+}
+
+/**
  * Format a command failure with useful output context.
  * If the output contains an authentication error, returns just that error message.
  * Otherwise returns the full error with output context.
@@ -268,6 +317,9 @@ export async function execCommandStreaming(
 	env?: Record<string, string>,
 	stdinContent?: string,
 ): Promise<{ exitCode: number }> {
+	// Log the command being executed
+	logDebug(`$ ${formatCommand(command, args)}`);
+
 	if (isBun) {
 		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
 		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
@@ -333,6 +385,7 @@ export async function execCommandStreaming(
 			// Process any remaining data
 			if (stdoutBuffer.trim()) onLine(stdoutBuffer);
 			if (stderrBuffer.trim()) onLine(stderrBuffer);
+			logCommandOutput(stdoutBuffer, stderrBuffer);
 			resolve({ exitCode: exitCode ?? 1 });
 		});
 
