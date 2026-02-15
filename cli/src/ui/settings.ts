@@ -17,7 +17,8 @@ export function buildActiveSettings(options: RuntimeOptions): string[] {
 
 	if (options.dryRun) activeSettings.push("dry-run");
 	if (options.branchPerTask) activeSettings.push("branch");
-	if (options.createPr) activeSettings.push("pr");
+	if (options.createPr && options.createMr) activeSettings.push("mr");
+	else if (options.createPr) activeSettings.push("pr");
 	if (options.parallel) activeSettings.push("parallel");
 	if (!options.autoCommit) activeSettings.push("no-commit");
 

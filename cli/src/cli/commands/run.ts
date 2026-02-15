@@ -83,7 +83,10 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 
 	// Get base branch if needed
 	let baseBranch = options.baseBranch;
-	if ((options.branchPerTask || options.parallel || options.createPr) && !baseBranch) {
+	if (
+		(options.branchPerTask || options.parallel || options.createPr || options.createMr) &&
+		!baseBranch
+	) {
 		baseBranch = await getDefaultBaseBranch(workDir);
 
 		// Check if base branch is empty (unborn branch - no commits yet)
@@ -127,6 +130,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			baseBranch,
 			createPr: options.createPr,
 			draftPr: options.draftPr,
+			createMr: options.createMr,
 			autoCommit: options.autoCommit,
 			browserEnabled: options.browserEnabled,
 			maxParallel: options.maxParallel,
@@ -155,6 +159,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			baseBranch,
 			createPr: options.createPr,
 			draftPr: options.draftPr,
+			createMr: options.createMr,
 			autoCommit: options.autoCommit,
 			browserEnabled: options.browserEnabled,
 			activeSettings,
