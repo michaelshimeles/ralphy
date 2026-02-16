@@ -2,6 +2,7 @@ import { logTaskProgress } from "../config/writer.ts";
 import type { AIEngine, AIResult } from "../engines/types.ts";
 import { createTaskBranch, returnToBaseBranch } from "../git/branch.ts";
 import { syncPrdToIssue } from "../git/issue-sync.ts";
+import { createMergeRequest } from "../git/mr.ts";
 import { createPullRequest } from "../git/pr.ts";
 import type { Task, TaskSource } from "../tasks/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
@@ -25,6 +26,7 @@ export interface ExecutionOptions {
 	baseBranch: string;
 	createPr: boolean;
 	draftPr: boolean;
+	createMr: boolean;
 	autoCommit: boolean;
 	browserEnabled: "auto" | "true" | "false";
 	prdFile?: string;
@@ -67,6 +69,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		baseBranch,
 		createPr,
 		draftPr,
+		createMr,
 		autoCommit,
 		browserEnabled,
 		activeSettings,
@@ -188,19 +191,36 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 					notifyTaskComplete(task.title);
 					clearDeferredTask(taskSource.type, task, workDir, options.prdFile);
 
-					// Create PR if needed
+					// Create PR/MR if needed
 					if (createPr && branch && baseBranch) {
-						const prUrl = await createPullRequest(
-							branch,
-							baseBranch,
-							task.title,
-							`Automated PR created by Ralphy\n\n${aiResult.response}`,
-							draftPr,
-							workDir,
-						);
+						const description = `Automated ${createMr ? "MR" : "PR"} created by Ralphy\n\n${aiResult.response}`;
 
-						if (prUrl) {
-							logSuccess(`PR created: ${prUrl}`);
+						if (createMr) {
+							const mrUrl = await createMergeRequest(
+								branch,
+								baseBranch,
+								task.title,
+								description,
+								draftPr,
+								workDir,
+							);
+
+							if (mrUrl) {
+								logSuccess(`MR created: ${mrUrl}`);
+							}
+						} else {
+							const prUrl = await createPullRequest(
+								branch,
+								baseBranch,
+								task.title,
+								description,
+								draftPr,
+								workDir,
+							);
+
+							if (prUrl) {
+								logSuccess(`PR created: ${prUrl}`);
+							}
 						}
 					}
 				} else {

@@ -87,6 +87,8 @@ export interface RuntimeOptions {
 	createPr: boolean;
 	/** Create draft PR */
 	draftPr: boolean;
+	/** Create GitLab MR instead of GitHub PR */
+	createMr: boolean;
 	/** Run tasks in parallel */
 	parallel: boolean;
 	/** Maximum parallel agents */
@@ -133,6 +135,7 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	baseBranch: "",
 	createPr: false,
 	draftPr: false,
+	createMr: false,
 	parallel: false,
 	maxParallel: 3,
 	prdSource: "markdown",

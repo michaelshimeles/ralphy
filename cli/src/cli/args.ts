@@ -44,6 +44,7 @@ export function createProgram(): Command {
 		.option("--base-branch <branch>", "Base branch for PRs")
 		.option("--create-pr", "Create pull request after each task")
 		.option("--draft-pr", "Create PRs as draft")
+		.option("--glab", "Use GitLab MR instead of GitHub PR (with --create-pr)")
 		.option("--prd <path>", "PRD file or folder (auto-detected)", "PRD.md")
 		.option("--yaml <file>", "YAML task file")
 		.option("--json <file>", "JSON task file")
@@ -143,8 +144,9 @@ export function parseArgs(args: string[]): {
 		verbose: opts.verbose || false,
 		branchPerTask: opts.branchPerTask || false,
 		baseBranch: opts.baseBranch || "",
-		createPr: opts.createPr || false,
+		createPr: opts.createPr || opts.glab || false,
 		draftPr: opts.draftPr || false,
+		createMr: opts.glab || false,
 		parallel: opts.parallel || false,
 		maxParallel: Number.parseInt(opts.maxParallel, 10) || 3,
 		prdSource,
