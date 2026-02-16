@@ -104,8 +104,33 @@ export async function commitSandboxChanges(
 				}
 			}
 
-			// Stage all modified files
-			await git.add(modifiedFiles);
+			// Filter out gitignored files before staging
+			let filesToStage = modifiedFiles;
+			try {
+				const ignored = await git.raw(["check-ignore", ...modifiedFiles]);
+				const ignoredSet = new Set(
+					ignored
+						.split("\n")
+						.map((l) => l.trim())
+						.filter(Boolean),
+				);
+				filesToStage = modifiedFiles.filter((f) => !ignoredSet.has(f));
+			} catch {
+				// check-ignore exits non-zero when NO files are ignored -- that means all files are safe
+			}
+
+			if (filesToStage.length === 0) {
+				logDebug(`Agent ${agentNum}: All modified files are gitignored, nothing to commit`);
+				await git.checkout(currentBranch);
+				return {
+					success: true,
+					branchName: "",
+					filesCommitted: 0,
+				};
+			}
+
+			// Stage non-ignored modified files
+			await git.add(filesToStage);
 
 			// Commit
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
