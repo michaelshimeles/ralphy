@@ -248,19 +248,19 @@ export async function hasTelemetryData(options?: { outputDir?: string }): Promis
 
 // Re-export types and classes for advanced usage
 export { TelemetryCollector } from "./collector.js";
-export { TelemetryWriter } from "./writer.js";
 export { TelemetryExporter } from "./exporter.js";
 export type {
-	Session,
-	SessionFull,
-	ToolCall,
-	ToolCallSummary,
-	TelemetryLevel,
-	TelemetryOptions,
-	TelemetryConfig,
-	ExportFormat,
 	DeepEvalExport,
 	DeepEvalTestCase,
+	ExportFormat,
 	OpenAIEvalsEntry,
 	RawExportEntry,
+	Session,
+	SessionFull,
+	TelemetryConfig,
+	TelemetryLevel,
+	TelemetryOptions,
+	ToolCall,
+	ToolCallSummary,
 } from "./types.js";
+export { TelemetryWriter } from "./writer.js";

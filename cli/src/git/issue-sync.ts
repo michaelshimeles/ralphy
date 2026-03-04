@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { logDebug, logSuccess, logWarn } from "../ui/logger.ts";
 
 /**
@@ -40,12 +40,17 @@ export async function syncPrdToIssue(
 	}
 
 	// Read PRD file content
-	const prdPath = prdFile.startsWith("/") ? prdFile : join(workDir, prdFile);
+	const prdPath = isAbsolute(prdFile) ? resolve(prdFile) : resolve(workDir, prdFile);
+	const resolvedWorkDir = resolve(workDir);
+	if (prdPath !== resolvedWorkDir && !prdPath.startsWith(`${resolvedWorkDir}${sep}`)) {
+		logWarn(`Cannot sync: PRD path is outside working directory (${prdFile})`);
+		return false;
+	}
 	let prdContent: string;
 
 	try {
 		prdContent = readFileSync(prdPath, "utf-8");
-	} catch (error) {
+	} catch (_error) {
 		logWarn(`Cannot sync: ${prdFile} not found`);
 		return false;
 	}

@@ -7,10 +7,11 @@ import { isBrowserAvailable } from "../../execution/browser.ts";
 import { buildPrompt } from "../../execution/prompt.ts";
 import { isRetryableError, withRetry } from "../../execution/retry.ts";
 import { sendNotifications } from "../../notifications/webhook.ts";
-import { formatTokens, logError, logInfo, setVerbose } from "../../ui/logger.ts";
+import { formatTokens, logInfo, setVerbose } from "../../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
 import { ProgressSpinner } from "../../ui/spinner.ts";
+import { standardizeError } from "../../utils/errors.ts";
 
 /**
  * Run a single task (brownfield mode)
@@ -27,8 +28,9 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 	const available = await isEngineAvailable(options.aiEngine as AIEngineName);
 
 	if (!available) {
-		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
+		throw new Error(
+			`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`,
+		);
 	}
 
 	logInfo(`Running task with ${engine.name}...`);
@@ -56,8 +58,8 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 
 	if (options.dryRun) {
 		spinner.success("(dry run) Would execute task");
-		console.log("\nPrompt:");
-		console.log(prompt);
+		logInfo("\nPrompt preview hidden in dry-run to avoid leaking sensitive content.");
+		logInfo(`Prompt length: ${prompt.length} chars`);
 		return;
 	}
 
@@ -71,6 +73,8 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 					...(options.modelOverride && { modelOverride: options.modelOverride }),
 					...(options.engineArgs &&
 						options.engineArgs.length > 0 && { engineArgs: options.engineArgs }),
+					...(options.debugOpenCode && { debugOpenCode: options.debugOpenCode }),
+					...(options.dryRun && { dryRun: true }),
 				};
 
 				// Use streaming if available
@@ -115,24 +119,17 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 
 			// Show response summary
 			if (result.response && result.response !== "Task completed") {
-				console.log("\nResult:");
-				console.log(result.response.slice(0, 500));
+				logInfo("\nResult:");
+				logInfo(result.response.slice(0, 500));
 				if (result.response.length > 500) {
-					console.log("...");
+					logInfo("...");
 				}
 			}
 		} else {
-			spinner.error(result.error || "Unknown error");
-			logTaskProgress(task, "failed", workDir);
-			await sendNotifications(config, "failed", {
-				tasksCompleted: 0,
-				tasksFailed: 1,
-			});
-			notifyTaskFailed(task, result.error || "Unknown error");
-			process.exit(1);
+			throw new Error(result.error || "Task failed");
 		}
 	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
+		const errorMsg = standardizeError(error).message;
 		spinner.error(errorMsg);
 		logTaskProgress(task, "failed", workDir);
 		await sendNotifications(config, "failed", {
@@ -140,6 +137,6 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 			tasksFailed: 1,
 		});
 		notifyTaskFailed(task, errorMsg);
-		process.exit(1);
+		throw error;
 	}
 }

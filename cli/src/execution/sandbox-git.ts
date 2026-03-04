@@ -12,7 +12,7 @@ class GitMutex {
 	private queue: Promise<void> = Promise.resolve();
 
 	async acquire<T>(fn: () => Promise<T>): Promise<T> {
-		let release: () => void;
+		let release: (() => void) | undefined;
 		const next = new Promise<void>((resolve) => {
 			release = resolve;
 		});
@@ -22,7 +22,7 @@ class GitMutex {
 		try {
 			return await fn();
 		} finally {
-			release!();
+			release?.();
 		}
 	}
 }

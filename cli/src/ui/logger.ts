@@ -1,6 +1,6 @@
 import pc from "picocolors";
 
-let verboseMode = false;
+export let verboseMode = false;
 
 /**
  * Set verbose mode

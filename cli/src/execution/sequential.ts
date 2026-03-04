@@ -171,7 +171,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 				);
 
 				if (aiResult.success) {
-					spinner.success(undefined, true); // Show timing breakdown
+					spinner.success(undefined);
 					result.totalInputTokens += aiResult.inputTokens;
 					result.totalOutputTokens += aiResult.outputTokens;
 

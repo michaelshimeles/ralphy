@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { logDebug } from "../ui/logger.ts";
 import type { Session, SessionFull, ToolCall } from "./types.js";
 
 const DEFAULT_OUTPUT_DIR = ".ralphy/telemetry";
@@ -56,7 +57,7 @@ export class TelemetryWriter {
 	async writeSession(session: Session | SessionFull): Promise<void> {
 		await this.ensureDir();
 		const path = join(this.outputDir, SESSIONS_FILE);
-		const line = JSON.stringify(session) + "\n";
+		const line = `${JSON.stringify(session)}\n`;
 		await appendFile(path, line, "utf-8");
 	}
 
@@ -68,7 +69,7 @@ export class TelemetryWriter {
 
 		await this.ensureDir();
 		const path = join(this.outputDir, TOOL_CALLS_FILE);
-		const lines = toolCalls.map((call) => JSON.stringify(call)).join("\n") + "\n";
+		const lines = `${toolCalls.map((call) => JSON.stringify(call)).join("\n")}\n`;
 		await appendFile(path, lines, "utf-8");
 	}
 
@@ -92,7 +93,16 @@ export class TelemetryWriter {
 		const content = await readFile(path, "utf-8");
 		const lines = content.trim().split("\n").filter(Boolean);
 
-		return lines.map((line) => JSON.parse(line) as Session | SessionFull);
+		// BUG FIX: Wrap JSON.parse in try-catch to handle corrupt data
+		const sessions: Array<Session | SessionFull> = [];
+		for (const line of lines) {
+			try {
+				sessions.push(JSON.parse(line) as Session | SessionFull);
+			} catch (error) {
+				logDebug(`Failed to parse telemetry session line: ${error}`);
+			}
+		}
+		return sessions;
 	}
 
 	/**
@@ -108,7 +118,16 @@ export class TelemetryWriter {
 		const content = await readFile(path, "utf-8");
 		const lines = content.trim().split("\n").filter(Boolean);
 
-		return lines.map((line) => JSON.parse(line) as ToolCall);
+		// BUG FIX: Wrap JSON.parse in try-catch to handle corrupt data
+		const toolCalls: ToolCall[] = [];
+		for (const line of lines) {
+			try {
+				toolCalls.push(JSON.parse(line) as ToolCall);
+			} catch (error) {
+				logDebug(`Failed to parse telemetry tool-call line: ${error}`);
+			}
+		}
+		return toolCalls;
 	}
 
 	/**

@@ -1,7 +1,7 @@
 import pc from "picocolors";
 import { getConfigPath, isInitialized, loadConfig } from "../../config/loader.ts";
 import { addRule as addConfigRule } from "../../config/writer.ts";
-import { logError, logSuccess, logWarn } from "../../ui/logger.ts";
+import { logError, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
 
 /**
  * Handle --config command (show configuration)
@@ -20,43 +20,43 @@ export async function showConfig(workDir = process.cwd()): Promise<void> {
 
 	const configPath = getConfigPath(workDir);
 
-	console.log("");
-	console.log(`${pc.bold("Ralphy Configuration")} (${configPath})`);
-	console.log("");
+	logInfo("");
+	logInfo(`${pc.bold("Ralphy Configuration")} (${configPath})`);
+	logInfo("");
 
 	// Project info
-	console.log(pc.bold("Project:"));
-	console.log(`  Name:      ${config.project.name || "Unknown"}`);
-	console.log(`  Language:  ${config.project.language || "Unknown"}`);
-	if (config.project.framework) console.log(`  Framework: ${config.project.framework}`);
-	if (config.project.description) console.log(`  About:     ${config.project.description}`);
-	console.log("");
+	logInfo(pc.bold("Project:"));
+	logInfo(`  Name:      ${config.project.name || "Unknown"}`);
+	logInfo(`  Language:  ${config.project.language || "Unknown"}`);
+	if (config.project.framework) logInfo(`  Framework: ${config.project.framework}`);
+	if (config.project.description) logInfo(`  About:     ${config.project.description}`);
+	logInfo("");
 
 	// Commands
-	console.log(pc.bold("Commands:"));
-	console.log(`  Test:  ${config.commands.test || pc.dim("(not set)")}`);
-	console.log(`  Lint:  ${config.commands.lint || pc.dim("(not set)")}`);
-	console.log(`  Build: ${config.commands.build || pc.dim("(not set)")}`);
-	console.log("");
+	logInfo(pc.bold("Commands:"));
+	logInfo(`  Test:  ${config.commands.test || pc.dim("(not set)")}`);
+	logInfo(`  Lint:  ${config.commands.lint || pc.dim("(not set)")}`);
+	logInfo(`  Build: ${config.commands.build || pc.dim("(not set)")}`);
+	logInfo("");
 
 	// Rules
-	console.log(pc.bold("Rules:"));
+	logInfo(pc.bold("Rules:"));
 	if (config.rules.length > 0) {
 		for (const rule of config.rules) {
-			console.log(`  • ${rule}`);
+			logInfo(`  • ${rule}`);
 		}
 	} else {
-		console.log(`  ${pc.dim('(none - add with: ralphy --add-rule "...")')}`);
+		logInfo(`  ${pc.dim('(none - add with: ralphy --add-rule "...")')}`);
 	}
-	console.log("");
+	logInfo("");
 
 	// Boundaries
 	if (config.boundaries.never_touch.length > 0) {
-		console.log(pc.bold("Never Touch:"));
+		logInfo(pc.bold("Never Touch:"));
 		for (const path of config.boundaries.never_touch) {
-			console.log(`  • ${path}`);
+			logInfo(`  • ${path}`);
 		}
-		console.log("");
+		logInfo("");
 	}
 }
 

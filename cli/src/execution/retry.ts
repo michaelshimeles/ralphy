@@ -34,7 +34,7 @@ export function calculateBackoffDelay(
 	useJitter: boolean,
 ): number {
 	// Exponential backoff: baseDelay * 2^(attempt-1)
-	let delay = baseDelayMs * Math.pow(2, attempt - 1);
+	let delay = baseDelayMs * 2 ** (attempt - 1);
 
 	// Cap at maximum delay
 	delay = Math.min(delay, maxDelayMs);

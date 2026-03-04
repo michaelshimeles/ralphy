@@ -1,4 +1,5 @@
 import simpleGit, { type SimpleGit } from "simple-git";
+import { logDebug, logWarn } from "../ui/logger.ts";
 
 /**
  * Slugify text for branch names
@@ -25,29 +26,40 @@ export async function createTaskBranch(
 	// Stash any changes
 	let stashed = false;
 	const status = await git.status();
-	if (status.files.length > 0) {
-		await git.stash(["push", "-m", "ralphy-autostash"]);
+	if (status.files.length > 0 || status.not_added.length > 0) {
+		await git.stash(["push", "-u", "-m", "ralphy-autostash"]);
 		stashed = true;
 	}
 
 	try {
 		// Checkout base branch and pull
 		await git.checkout(baseBranch);
-		await git.pull("origin", baseBranch).catch(() => {
-			// Ignore pull errors
-		});
+		const remotes = await git.getRemotes(true);
+		if (remotes.some((remote) => remote.name === "origin")) {
+			const pullResult = await git.pull("origin", baseBranch);
+			if (pullResult.summary.changes > 0 || pullResult.summary.deletions > 0) {
+				logDebug(`Pulled changes to ${baseBranch}`);
+			}
+		} else {
+			logDebug("Remote 'origin' not configured, skipping pull");
+		}
 
 		// Create new branch (or checkout if exists)
 		try {
 			await git.checkoutLocalBranch(branchName);
-		} catch {
+		} catch (branchErr) {
+			logDebug(`Branch creation failed, trying checkout: ${branchErr}`);
 			await git.checkout(branchName);
 		}
+	} catch (err) {
+		const error = err instanceof Error ? err : new Error(String(err));
+		logWarn(`Failed to setup branch ${branchName}: ${error.message}`);
+		throw error;
 	} finally {
 		// Pop stash if we stashed
 		if (stashed) {
-			await git.stash(["pop"]).catch(() => {
-				// Ignore stash pop errors
+			await git.stash(["pop"]).catch((err) => {
+				logWarn(`Failed to pop stash: ${err}`);
 			});
 		}
 	}
@@ -63,9 +75,13 @@ export async function returnToBaseBranch(
 	workDir = process.cwd(),
 ): Promise<void> {
 	const git: SimpleGit = simpleGit(workDir);
-	await git.checkout(baseBranch).catch(() => {
-		// Ignore checkout errors
-	});
+	try {
+		await git.checkout(baseBranch);
+	} catch (err) {
+		const error = err instanceof Error ? err : new Error(String(err));
+		logWarn(`Failed to checkout ${baseBranch}: ${error.message}`);
+		throw error;
+	}
 }
 
 /**
