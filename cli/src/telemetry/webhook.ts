@@ -76,11 +76,10 @@ export async function sendTelemetryWebhook(
 	}
 
 	const payload = buildPayload(session, level);
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
 	try {
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
 		const response = await fetch(webhookUrl, {
 			method: "POST",
 			headers: {
@@ -90,14 +89,19 @@ export async function sendTelemetryWebhook(
 			signal: controller.signal,
 		});
 
-		clearTimeout(timeoutId);
-
 		if (!response.ok) {
 			const text = await response.text().catch(() => "");
 			throw new Error(`HTTP ${response.status}${text ? `: ${text}` : ""}`);
 		}
 
-		logDebug(`Telemetry webhook sent successfully to ${webhookUrl}`);
+		const safeTarget = (() => {
+			try {
+				return new URL(webhookUrl).host;
+			} catch {
+				return "configured endpoint";
+			}
+		})();
+		logDebug(`Telemetry webhook sent successfully to ${safeTarget}`);
 	} catch (error) {
 		if (error instanceof Error && error.name === "AbortError") {
 			logError("Telemetry webhook timed out after 10 seconds");
@@ -107,5 +111,7 @@ export async function sendTelemetryWebhook(
 			);
 		}
 		// Don't throw - webhook failures shouldn't break the session
+	} finally {
+		clearTimeout(timeoutId);
 	}
 }

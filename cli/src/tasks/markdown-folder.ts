@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { Task, TaskSource } from "./types.ts";
 
 /**
@@ -10,39 +10,13 @@ function readFileNormalized(filePath: string): string {
 }
 
 /**
- * Cached data for a single markdown file
- */
-interface FileCacheEntry {
-	content: string;
-	lines: string[];
-	incompleteTasks: Task[];
-	remainingCount: number;
-	completedCount: number;
-}
-
-/**
- * Cached data for the entire folder
- */
-interface FolderCache {
-	files: Map<string, FileCacheEntry>;
-	fileMtimes: Map<string, number>;
-	allTasks: Task[];
-	totalRemaining: number;
-	totalCompleted: number;
-}
-
-/**
  * Markdown folder task source - reads tasks from multiple markdown files in a folder
  * Each task ID includes the source file for proper tracking: "filename.md:lineNumber"
- *
- * Performance optimized: caches all file contents and task counts to avoid
- * redundant file reads across getAllTasks(), countRemaining(), and countCompleted().
  */
 export class MarkdownFolderTaskSource implements TaskSource {
 	type = "markdown-folder" as const;
 	private folderPath: string;
 	private markdownFiles: string[] = [];
-	private cache: FolderCache | null = null;
 
 	constructor(folderPath: string) {
 		this.folderPath = folderPath;
@@ -82,8 +56,22 @@ export class MarkdownFolderTaskSource implements TaskSource {
 			throw new Error(`Invalid task ID format: ${id}`);
 		}
 		const fileName = id.substring(0, lastColon);
+		if (fileName !== basename(fileName) || !fileName.endsWith(".md")) {
+			throw new Error(`Invalid task file in task ID: ${id}`);
+		}
 		const lineNumber = Number.parseInt(id.substring(lastColon + 1), 10);
+		if (!Number.isFinite(lineNumber) || lineNumber <= 0) {
+			throw new Error(`Invalid task line number in task ID: ${id}`);
+		}
 		const filePath = join(this.folderPath, fileName);
+		const baseResolved = resolve(this.folderPath);
+		const fileResolved = resolve(filePath);
+		if (
+			fileResolved !== baseResolved &&
+			!fileResolved.startsWith(`${baseResolved}${sep}`)
+		) {
+			throw new Error(`Task ID path escapes markdown folder: ${id}`);
+		}
 		return { filePath, lineNumber };
 	}
 
@@ -95,34 +83,12 @@ export class MarkdownFolderTaskSource implements TaskSource {
 		return `${fileName}:${lineNumber}`;
 	}
 
-	/**
-	 * Get a file's modification time
-	 */
-	private getFileMtime(filePath: string): number {
-		try {
-			return statSync(filePath).mtimeMs;
-		} catch {
-			return 0;
-		}
-	}
-
-	/**
-	 * Load and cache all file contents with parsed task data
-	 */
-	private loadCache(): FolderCache {
-		const files = new Map<string, FileCacheEntry>();
-		const fileMtimes = new Map<string, number>();
+	async getAllTasks(): Promise<Task[]> {
 		const allTasks: Task[] = [];
-		let totalRemaining = 0;
-		let totalCompleted = 0;
 
 		for (const filePath of this.markdownFiles) {
-			fileMtimes.set(filePath, this.getFileMtime(filePath));
 			const content = readFileNormalized(filePath);
 			const lines = content.split("\n");
-			const incompleteTasks: Task[] = [];
-			let remainingCount = 0;
-			let completedCount = 0;
 
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i];
@@ -130,88 +96,25 @@ export class MarkdownFolderTaskSource implements TaskSource {
 				// Match incomplete tasks
 				const incompleteMatch = line.match(/^- \[ \] (.+)$/);
 				if (incompleteMatch) {
-					const task = {
+					allTasks.push({
 						id: this.createTaskId(filePath, i + 1),
 						title: incompleteMatch[1].trim(),
 						completed: false,
-					};
-					incompleteTasks.push(task);
-					allTasks.push(task);
-					remainingCount++;
-				}
-
-				// Match completed tasks
-				if (/^- \[x\] /i.test(line)) {
-					completedCount++;
+					});
 				}
 			}
-
-			files.set(filePath, {
-				content,
-				lines,
-				incompleteTasks,
-				remainingCount,
-				completedCount,
-			});
-
-			totalRemaining += remainingCount;
-			totalCompleted += completedCount;
 		}
 
-		this.cache = {
-			files,
-			fileMtimes,
-			allTasks,
-			totalRemaining,
-			totalCompleted,
-		};
-
-		return this.cache;
-	}
-
-	/**
-	 * Check if any cached file has been modified externally
-	 */
-	private isCacheStale(): boolean {
-		if (!this.cache) return true;
-		for (const [filePath, cachedMtime] of this.cache.fileMtimes) {
-			if (this.getFileMtime(filePath) !== cachedMtime) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
-	 * Get cached content or load fresh if any file was modified externally
-	 */
-	private getCache(): FolderCache {
-		if (!this.cache || this.isCacheStale()) {
-			return this.loadCache();
-		}
-		return this.cache;
-	}
-
-	/**
-	 * Invalidate cache (call after file modifications)
-	 */
-	private invalidateCache(): void {
-		this.cache = null;
-	}
-
-	async getAllTasks(): Promise<Task[]> {
-		return [...this.getCache().allTasks];
+		return allTasks;
 	}
 
 	async getNextTask(): Promise<Task | null> {
-		const cache = this.getCache();
-		return cache.allTasks[0] || null;
+		const tasks = await this.getAllTasks();
+		return tasks[0] || null;
 	}
 
 	async markComplete(id: string): Promise<void> {
 		const { filePath, lineNumber } = this.parseTaskId(id);
-		// Force fresh read for modification to avoid stale data
-		this.invalidateCache();
 		const content = readFileNormalized(filePath);
 		const lines = content.split("\n");
 		const lineIndex = lineNumber - 1;
@@ -220,17 +123,31 @@ export class MarkdownFolderTaskSource implements TaskSource {
 			// Replace "- [ ]" with "- [x]"
 			lines[lineIndex] = lines[lineIndex].replace(/^- \[ \] /, "- [x] ");
 			writeFileSync(filePath, lines.join("\n"), "utf-8");
-			// Invalidate cache after modification
-			this.invalidateCache();
 		}
 	}
 
 	async countRemaining(): Promise<number> {
-		return this.getCache().totalRemaining;
+		let count = 0;
+
+		for (const filePath of this.markdownFiles) {
+			const content = readFileNormalized(filePath);
+			const matches = content.match(/^- \[ \] /gm);
+			count += matches?.length || 0;
+		}
+
+		return count;
 	}
 
 	async countCompleted(): Promise<number> {
-		return this.getCache().totalCompleted;
+		let count = 0;
+
+		for (const filePath of this.markdownFiles) {
+			const content = readFileNormalized(filePath);
+			const matches = content.match(/^- \[x\] /gim);
+			count += matches?.length || 0;
+		}
+
+		return count;
 	}
 
 	/**

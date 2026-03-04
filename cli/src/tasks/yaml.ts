@@ -13,6 +13,50 @@ interface YamlTaskFile {
 	tasks: YamlTask[];
 }
 
+export function hasPrototypePollution(obj: unknown): boolean {
+	const MAX_DEPTH = 20;
+	const MAX_NODES = 10000;
+	const dangerousKeys = new Set(["__proto__"]);
+
+	if (typeof obj !== "object" || obj === null) return false;
+
+	const visited = new Set<unknown>();
+	const queue: Array<{ value: unknown; depth: number }> = [{ value: obj, depth: 0 }];
+	let head = 0;
+	let nodesVisited = 0;
+
+	while (head < queue.length) {
+		const current = queue[head++];
+		if (!current) continue;
+
+		nodesVisited++;
+		if (nodesVisited > MAX_NODES) {
+			throw new Error("YAML file too complex to validate safely");
+		}
+
+		if (current.depth > MAX_DEPTH) {
+			throw new Error("YAML file nesting exceeds safety limits");
+		}
+
+		if (typeof current.value !== "object" || current.value === null) {
+			continue;
+		}
+
+		if (visited.has(current.value)) {
+			continue;
+		}
+		visited.add(current.value);
+
+		for (const key of Object.keys(current.value)) {
+			if (dangerousKeys.has(key)) return true;
+			const value = (current.value as Record<string, unknown>)[key];
+			queue.push({ value, depth: current.depth + 1 });
+		}
+	}
+
+	return false;
+}
+
 /**
  * YAML task source - reads tasks from YAML files
  * Format:
@@ -30,19 +74,37 @@ export class YamlTaskSource implements TaskSource {
 	}
 
 	private readFile(): YamlTaskFile {
-		const content = readFileSync(this.filePath, "utf-8");
-		return YAML.parse(content) as YamlTaskFile;
+		try {
+			const content = readFileSync(this.filePath, "utf-8");
+			const parsed = YAML.parse(content) as YamlTaskFile;
+
+			if (hasPrototypePollution(parsed)) {
+				throw new Error("YAML file contains potentially malicious prototype pollution keys");
+			}
+
+			return parsed;
+		} catch (error) {
+			throw new Error(
+				`Failed to read/parse YAML file: ${error instanceof Error ? error.message : error}`,
+			);
+		}
 	}
 
 	private writeFile(data: YamlTaskFile): void {
-		writeFileSync(this.filePath, YAML.stringify(data), "utf-8");
+		try {
+			writeFileSync(this.filePath, YAML.stringify(data), "utf-8");
+		} catch (error) {
+			throw new Error(
+				`Failed to write YAML file: ${error instanceof Error ? error.message : error}`,
+			);
+		}
 	}
 
 	async getAllTasks(): Promise<Task[]> {
 		const data = this.readFile();
 		return (data.tasks || [])
 			.filter((t) => !t.completed)
-			.map((t, i) => ({
+			.map((t, _i) => ({
 				id: t.title, // Use title as ID for YAML tasks
 				title: t.title,
 				body: t.description,

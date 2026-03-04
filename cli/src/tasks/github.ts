@@ -2,71 +2,54 @@ import { Octokit } from "@octokit/rest";
 import type { Task, TaskSource } from "./types.ts";
 
 /**
- * Cached GitHub issues data
+ * GitHub token patterns for validation
+ * Supports classic PATs (ghp_), fine-grained PATs (github_pat_), OAuth tokens (gho_),
+ * and GitHub App installation tokens (ghs_).
  */
-interface GitHubCache {
-	openIssues: Task[];
-	closedCount: number;
-	lastFetched: number;
+const GITHUB_TOKEN_PATTERNS = [
+	/^ghp_[A-Za-z0-9]{36}$/, // Classic PAT
+	/^github_pat_[A-Za-z0-9_]{82}$/, // Fine-grained PAT
+	/^gho_[A-Za-z0-9]{52}$/, // OAuth token
+	/^ghs_[A-Za-z0-9]{36}$/, // GitHub App installation token
+];
+
+function validateGitHubToken(token: string): boolean {
+	return GITHUB_TOKEN_PATTERNS.some((pattern) => pattern.test(token));
 }
 
-/** Cache TTL in milliseconds (30 seconds) */
-const CACHE_TTL_MS = 30_000;
-
-/**
- * GitHub Issues task source - reads tasks from GitHub issues
- *
- * Performance optimized: caches issue data to avoid redundant API calls.
- * Cache is invalidated after TTL or when markComplete() is called.
- */
 export class GitHubTaskSource implements TaskSource {
 	type = "github" as const;
 	private octokit: Octokit;
 	private owner: string;
 	private repo: string;
 	private label?: string;
-	private cache: GitHubCache | null = null;
 
 	constructor(repoPath: string, label?: string) {
-		// Parse owner/repo format
-		const [owner, repo] = repoPath.split("/");
-		if (!owner || !repo) {
+		const parts = repoPath.split("/").filter(Boolean);
+		if (parts.length !== 2) {
 			throw new Error(`Invalid repo format: ${repoPath}. Expected owner/repo`);
 		}
+		const [owner, repo] = parts;
 
 		this.owner = owner;
 		this.repo = repo;
 		this.label = label;
 
-		// Use GITHUB_TOKEN from environment
-		this.octokit = new Octokit({
-			auth: process.env.GITHUB_TOKEN,
-		});
-	}
-
-	/**
-	 * Check if cache is still valid
-	 */
-	private isCacheValid(): boolean {
-		if (!this.cache) return false;
-		return Date.now() - this.cache.lastFetched < CACHE_TTL_MS;
-	}
-
-	/**
-	 * Invalidate the cache
-	 */
-	private invalidateCache(): void {
-		this.cache = null;
-	}
-
-	/**
-	 * Fetch and cache open issues
-	 */
-	private async fetchOpenIssues(): Promise<Task[]> {
-		if (this.isCacheValid() && this.cache) {
-			return this.cache.openIssues;
+		const token = process.env.GITHUB_TOKEN;
+		if (!token) {
+			throw new Error("GITHUB_TOKEN environment variable is not set");
 		}
 
+		if (!validateGitHubToken(token)) {
+			throw new Error(
+				"GITHUB_TOKEN has invalid format. Expected: ghp_***, github_pat_***, gho_***, or ghs_***",
+			);
+		}
+
+		this.octokit = new Octokit({ auth: token });
+	}
+
+	async getAllTasks(): Promise<Task[]> {
 		const issues = await this.octokit.paginate(this.octokit.issues.listForRepo, {
 			owner: this.owner,
 			repo: this.repo,
@@ -75,36 +58,21 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const tasks = issues.map((issue) => ({
+		return issues.map((issue) => ({
 			id: `${issue.number}:${issue.title}`,
 			title: issue.title,
 			body: issue.body || undefined,
 			completed: false,
 		}));
-
-		// Update cache (preserve closed count if we have it)
-		this.cache = {
-			openIssues: tasks,
-			closedCount: this.cache?.closedCount ?? -1,
-			lastFetched: Date.now(),
-		};
-
-		return tasks;
-	}
-
-	async getAllTasks(): Promise<Task[]> {
-		return await this.fetchOpenIssues();
 	}
 
 	async getNextTask(): Promise<Task | null> {
-		const tasks = await this.fetchOpenIssues();
+		const tasks = await this.getAllTasks();
 		return tasks[0] || null;
 	}
 
 	async markComplete(id: string): Promise<void> {
-		// Extract issue number from "number:title" format
 		const issueNumber = Number.parseInt(id.split(":")[0], 10);
-
 		if (Number.isNaN(issueNumber)) {
 			throw new Error(`Invalid issue ID: ${id}`);
 		}
@@ -115,22 +83,21 @@ export class GitHubTaskSource implements TaskSource {
 			issue_number: issueNumber,
 			state: "closed",
 		});
-
-		// Invalidate cache after modification
-		this.invalidateCache();
 	}
 
 	async countRemaining(): Promise<number> {
-		const tasks = await this.fetchOpenIssues();
-		return tasks.length;
+		const issues = await this.octokit.paginate(this.octokit.issues.listForRepo, {
+			owner: this.owner,
+			repo: this.repo,
+			state: "open",
+			labels: this.label,
+			per_page: 100,
+		});
+
+		return issues.length;
 	}
 
 	async countCompleted(): Promise<number> {
-		// Check if we have a recent closed count
-		if (this.isCacheValid() && this.cache && this.cache.closedCount >= 0) {
-			return this.cache.closedCount;
-		}
-
 		const issues = await this.octokit.paginate(this.octokit.issues.listForRepo, {
 			owner: this.owner,
 			repo: this.repo,
@@ -139,22 +106,11 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const closedCount = issues.length;
-
-		// Update cache with closed count
-		if (this.cache) {
-			this.cache.closedCount = closedCount;
-		}
-
-		return closedCount;
+		return issues.length;
 	}
 
-	/**
-	 * Get full issue body for a task
-	 */
 	async getIssueBody(id: string): Promise<string> {
 		const issueNumber = Number.parseInt(id.split(":")[0], 10);
-
 		if (Number.isNaN(issueNumber)) {
 			return "";
 		}

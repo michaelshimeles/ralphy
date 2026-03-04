@@ -169,6 +169,18 @@ ralphy --github owner/repo
 ralphy --github owner/repo --github-label "ready"
 ```
 
+## Task file conversion
+
+Convert task files between supported formats:
+
+```bash
+ralphy --convert-from PRD.md
+ralphy --convert-from tasks.yaml --convert-to tasks.csv
+ralphy --convert-from backlog.json --convert-to backlog.csv
+```
+
+If `--convert-to` is omitted, output defaults to a `.csv` file next to the input.
+
 ## Parallel Execution
 
 ```bash
@@ -313,6 +325,8 @@ ralphy --parallel --sandbox
 | `--init` | setup .ralphy/ config |
 | `--config` | show config |
 | `--add-rule "rule"` | add rule to config |
+| `--convert-from FILE` | convert a task file from markdown/yaml/json |
+| `--convert-to FILE` | output file path for conversion |
 
 ## Requirements
 

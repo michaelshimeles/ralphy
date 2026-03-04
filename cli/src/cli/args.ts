@@ -19,6 +19,8 @@ export function createProgram(): Command {
 		.option("--init", "Initialize .ralphy/ configuration")
 		.option("--config", "Show current configuration")
 		.option("--add-rule <rule>", "Add a rule to config")
+		.option("--convert-from <file>", "Convert task file from supported format")
+		.option("--convert-to <file>", "Output file for conversion")
 		.option("--no-tests, --skip-tests", "Skip running tests")
 		.option("--no-lint, --skip-lint", "Skip running lint")
 		.option("--fast", "Skip both tests and lint")
@@ -71,6 +73,8 @@ export function parseArgs(args: string[]): {
 	initMode: boolean;
 	showConfig: boolean;
 	addRule: string | undefined;
+	convertFrom: string | undefined;
+	convertTo: string | undefined;
 } {
 	// Find the -- separator and extract engine-specific arguments
 	const separatorIndex = args.indexOf("--");
@@ -167,6 +171,8 @@ export function parseArgs(args: string[]): {
 		initMode: opts.init || false,
 		showConfig: opts.config || false,
 		addRule: opts.addRule,
+		convertFrom: opts.convertFrom,
+		convertTo: opts.convertTo,
 	};
 }
 

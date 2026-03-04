@@ -130,9 +130,15 @@ export class MarkdownTaskSource implements TaskSource {
 		if (lineNumber >= 0 && lineNumber < lines.length) {
 			// Replace "- [ ]" with "- [x]"
 			lines[lineNumber] = lines[lineNumber].replace(/^- \[ \] /, "- [x] ");
-			writeFileSync(this.filePath, lines.join("\n"), "utf-8");
+			try {
+				writeFileSync(this.filePath, lines.join("\n"), "utf-8");
+			} catch (error) {
+				throw new Error(`Failed to write file: ${error instanceof Error ? error.message : error}`);
+			}
 			// Invalidate cache after modification
 			this.invalidateCache();
+		} else {
+			throw new Error(`Invalid task ID: ${id}`);
 		}
 	}
 
