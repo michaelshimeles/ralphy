@@ -79,6 +79,51 @@ export interface ToolCall {
 export type TelemetryLevel = "anonymous" | "full";
 
 /**
+ * Full session data for webhook
+ */
+interface WebhookSessionData {
+	sessionId: string;
+	engine: string;
+	mode: string;
+	cliVersion: string;
+	platform: string;
+	totalTokensIn: number;
+	totalTokensOut: number;
+	totalDurationMs: number;
+	taskCount: number;
+	successCount: number;
+	failedCount: number;
+	toolCalls: {
+		toolName: string;
+		callCount: number;
+		successCount: number;
+		failedCount: number;
+		avgDurationMs: number;
+	}[];
+	tags?: string[];
+}
+
+/**
+ * Full session details for webhook (full privacy mode)
+ */
+interface WebhookSessionDetails {
+	prompt?: string;
+	response?: string;
+	filePaths?: string[];
+}
+
+/**
+ * Telemetry webhook payload
+ */
+export interface TelemetryWebhookPayload {
+	event: string;
+	version: string;
+	timestamp: string;
+	session: WebhookSessionData;
+	details?: WebhookSessionDetails;
+}
+
+/**
  * Telemetry configuration
  */
 export interface TelemetryConfig {

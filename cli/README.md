@@ -247,6 +247,7 @@ notifications:
   discord_webhook: "https://discord.com/api/webhooks/..."
   slack_webhook: "https://hooks.slack.com/services/..."
   custom_webhook: "https://your-api.com/webhook"
+  telemetry_webhook: "https://your-api.com/telemetry"  # optional telemetry export hook
 ```
 
 Notifications include task completion counts and status (completed/failed).

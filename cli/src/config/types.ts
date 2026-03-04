@@ -17,6 +17,7 @@ export const NotificationsSchema = z.object({
 	discord_webhook: z.string().default(""),
 	slack_webhook: z.string().default(""),
 	custom_webhook: z.string().default(""),
+	telemetry_webhook: z.string().default(""),
 });
 
 /**
@@ -109,6 +110,8 @@ export interface RuntimeOptions {
 	browserEnabled: "auto" | "true" | "false";
 	/** Override default model for the engine */
 	modelOverride?: string;
+	/** Enable comprehensive OpenCode debugging */
+	debugOpenCode?: boolean;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
 	/** Use lightweight sandboxes instead of git worktrees for parallel execution */
@@ -142,4 +145,5 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	githubLabel: "",
 	autoCommit: true,
 	browserEnabled: "auto",
+	debugOpenCode: false,
 };
