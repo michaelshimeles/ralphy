@@ -345,6 +345,7 @@ ralphy --parallel --sandbox
 | Gemini | `gemini` | `--yolo` | tokens + cost |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
+Authentication and command-failure messages are parsed more strictly to reduce false positives and make retry behavior more predictable.
 
 ## Links
 

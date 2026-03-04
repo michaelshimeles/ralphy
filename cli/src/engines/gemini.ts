@@ -9,8 +9,6 @@ import {
 } from "./base.ts";
 import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
 
-const isWindows = process.platform === "win32";
-
 /**
  * Gemini CLI AI Engine
  * https://github.com/google-gemini/gemini-cli
@@ -19,7 +17,10 @@ export class GeminiEngine extends BaseAIEngine {
 	name = "Gemini CLI";
 	cliCommand = "gemini";
 
-	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+	/**
+	 * Build CLI arguments for Gemini
+	 */
+	protected buildArgs(prompt: string, workDir: string, options?: EngineOptions): string[] {
 		const args = ["--output-format", "stream-json", "--yolo"];
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
@@ -28,21 +29,32 @@ export class GeminiEngine extends BaseAIEngine {
 		if (options?.engineArgs && options.engineArgs.length > 0) {
 			args.push(...options.engineArgs);
 		}
+		// Pass prompt via stdin
+		args.push("-p");
+		return args;
+	}
 
-		// On Windows, pass prompt via stdin to avoid cmd.exe argument parsing issues with multi-line content
-		let stdinContent: string | undefined;
-		if (isWindows) {
-			args.push("-p");
-			stdinContent = prompt;
-		} else {
-			args.push("-p", prompt);
-		}
+	/**
+	 * Process CLI output into AIResult
+	 */
+	protected processCliResult(
+		_stdout: string,
+		_stderr: string,
+		_exitCode: number,
+		_workDir: string,
+	): AIResult {
+		throw new Error("GeminiEngine: use execute() or executeStreaming() directly");
+	}
+
+	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+		const args = this.buildArgs(prompt, workDir, options);
+		const stdinContent = prompt;
 
 		const { stdout, stderr, exitCode } = await execCommand(
 			this.cliCommand,
 			args,
 			workDir,
-			undefined,
+			this.getEnv(options),
 			stdinContent,
 		);
 
@@ -88,23 +100,8 @@ export class GeminiEngine extends BaseAIEngine {
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
 	): Promise<AIResult> {
-		const args = ["--output-format", "stream-json", "--yolo"];
-		if (options?.modelOverride) {
-			args.push("--model", options.modelOverride);
-		}
-		// Add any additional engine-specific arguments
-		if (options?.engineArgs && options.engineArgs.length > 0) {
-			args.push(...options.engineArgs);
-		}
-
-		// On Windows, pass prompt via stdin to avoid cmd.exe argument parsing issues with multi-line content
-		let stdinContent: string | undefined;
-		if (isWindows) {
-			args.push("-p");
-			stdinContent = prompt;
-		} else {
-			args.push("-p", prompt);
-		}
+		const args = this.buildArgs(prompt, workDir, options);
+		const stdinContent = prompt;
 
 		const outputLines: string[] = [];
 
@@ -121,7 +118,7 @@ export class GeminiEngine extends BaseAIEngine {
 					onProgress(step);
 				}
 			},
-			undefined,
+			this.getEnv(options),
 			stdinContent,
 		);
 

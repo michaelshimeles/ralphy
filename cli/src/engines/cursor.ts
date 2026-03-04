@@ -1,14 +1,7 @@
-import {
-	BaseAIEngine,
-	checkForErrors,
-	detectStepFromOutput,
-	execCommand,
-	execCommandStreaming,
-	formatCommandError,
-} from "./base.ts";
+import { logDebug } from "../ui/logger.ts";
+import { BaseAIEngine, checkForErrors, execCommand, execCommandStreaming } from "./base.ts";
+import { detectStepFromOutput, formatCommandError } from "./parsers.ts";
 import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
-
-const isWindows = process.platform === "win32";
 
 /**
  * Cursor Agent AI Engine
@@ -17,7 +10,15 @@ export class CursorEngine extends BaseAIEngine {
 	name = "Cursor Agent";
 	cliCommand = "agent";
 
-	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+	protected buildArgs(prompt: string, _workDir: string, options?: EngineOptions): string[] {
+		const { args } = this.buildArgsInternal(prompt, options);
+		return args;
+	}
+
+	private buildArgsInternal(
+		prompt: string,
+		options?: EngineOptions,
+	): { args: string[]; stdinContent?: string } {
 		const args = ["--print", "--force", "--output-format", "stream-json"];
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
@@ -27,19 +28,17 @@ export class CursorEngine extends BaseAIEngine {
 			args.push(...options.engineArgs);
 		}
 
-		// On Windows, pass prompt via stdin to avoid cmd.exe argument parsing issues
-		let stdinContent: string | undefined;
-		if (isWindows) {
-			stdinContent = prompt;
-		} else {
-			args.push(prompt);
-		}
+		return this.buildArgsWithStdin(args, prompt);
+	}
+
+	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+		const { args, stdinContent } = this.buildArgsInternal(prompt, options);
 
 		const { stdout, stderr, exitCode } = await execCommand(
 			this.cliCommand,
 			args,
 			workDir,
-			undefined,
+			this.getEnv(options),
 			stdinContent,
 		);
 
@@ -106,8 +105,8 @@ export class CursorEngine extends BaseAIEngine {
 						response = content;
 					}
 				}
-			} catch {
-				// Ignore non-JSON lines
+			} catch (_err) {
+				logDebug(`Cursor: Failed to parse JSON line: ${_err}`);
 			}
 		}
 
@@ -120,22 +119,7 @@ export class CursorEngine extends BaseAIEngine {
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
 	): Promise<AIResult> {
-		const args = ["--print", "--force", "--output-format", "stream-json"];
-		if (options?.modelOverride) {
-			args.push("--model", options.modelOverride);
-		}
-		// Add any additional engine-specific arguments
-		if (options?.engineArgs && options.engineArgs.length > 0) {
-			args.push(...options.engineArgs);
-		}
-
-		// On Windows, pass prompt via stdin to avoid cmd.exe argument parsing issues
-		let stdinContent: string | undefined;
-		if (isWindows) {
-			stdinContent = prompt;
-		} else {
-			args.push(prompt);
-		}
+		const { args, stdinContent } = this.buildArgsInternal(prompt, options);
 
 		const outputLines: string[] = [];
 
@@ -152,7 +136,7 @@ export class CursorEngine extends BaseAIEngine {
 					onProgress(step);
 				}
 			},
-			undefined,
+			this.getEnv(options),
 			stdinContent,
 		);
 
@@ -184,6 +168,36 @@ export class CursorEngine extends BaseAIEngine {
 			};
 		}
 
+		return {
+			success: true,
+			response,
+			inputTokens: 0,
+			outputTokens: 0,
+			cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
+		};
+	}
+
+	protected processCliResult(
+		stdout: string,
+		stderr: string,
+		exitCode: number,
+		_workDir: string,
+	): AIResult {
+		const output = stdout + stderr;
+		const error = checkForErrors(output);
+		if (error) {
+			return { success: false, response: "", inputTokens: 0, outputTokens: 0, error };
+		}
+		const { response, durationMs } = this.parseOutput(output);
+		if (exitCode !== 0) {
+			return {
+				success: false,
+				response,
+				inputTokens: 0,
+				outputTokens: 0,
+				error: formatCommandError(exitCode, output),
+			};
+		}
 		return {
 			success: true,
 			response,

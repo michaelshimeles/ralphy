@@ -161,7 +161,7 @@ export class TelemetryExporter {
 
 		await this.ensureExportsDir();
 		const filePath = outputPath || join(this.exportsDir, "openai-evals.jsonl");
-		await writeFile(filePath, entries.join("\n") + "\n", "utf-8");
+		await writeFile(filePath, `${entries.join("\n")}\n`, "utf-8");
 
 		return filePath;
 	}
@@ -194,7 +194,7 @@ export class TelemetryExporter {
 
 		await this.ensureExportsDir();
 		const filePath = outputPath || join(this.exportsDir, "raw-telemetry.jsonl");
-		const lines = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+		const lines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 		await writeFile(filePath, lines, "utf-8");
 
 		return filePath;

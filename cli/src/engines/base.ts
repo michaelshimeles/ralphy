@@ -1,463 +1,316 @@
-import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { DEFAULT_AI_ENGINE_TIMEOUT_MS } from "../config/constants.ts";
+import { logDebug } from "../ui/logger.ts";
+
+import { formatParsedStep, parseAIStep } from "../utils/ai-output-parser.ts";
+import { ErrorSchema, parseJsonLine } from "../utils/json-validation.ts";
+import { commandExists, execCommand, execCommandStreamingNew } from "./executor.ts";
+import { detectStepFromOutput } from "./parsers.ts";
 import type { AIEngine, AIResult, EngineOptions, ProgressCallback } from "./types.ts";
 
-// Check if running in Bun
-const isBun = typeof Bun !== "undefined";
-const isWindows = process.platform === "win32";
+// Re-export functions from new modules for backward compatibility
+export {
+	commandExists,
+	execCommand,
+	execCommandStreaming,
+	execCommandStreamingNew,
+} from "./executor.ts";
+export {
+	checkForErrors,
+	detectStepFromOutput,
+	extractAuthenticationError,
+	extractTokenCounts,
+	formatCommandError,
+	parseStreamJsonResult,
+} from "./parsers.ts";
+export { validateArgs, validateCommand, validateCommandAndArgs } from "./validation.ts";
 
-/**
- * Check if a command is available in PATH
- */
-export async function commandExists(command: string): Promise<boolean> {
-	try {
-		const checkCommand = isWindows ? "where" : "which";
-		if (isBun) {
-			const proc = Bun.spawn([checkCommand, command], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const exitCode = await proc.exited;
-			return exitCode === 0;
-		}
-		// Node.js fallback - where/which don't need shell
-		const result = spawnSync(checkCommand, [command], { stdio: "pipe" });
-		return result.status === 0;
-	} catch {
-		return false;
+const DEBUG = process.env.RALPHY_DEBUG === "true";
+
+function debugLog(...args: unknown[]): void {
+	if (DEBUG || (globalThis as { verboseMode?: boolean }).verboseMode === true) {
+		logDebug(args.map((a) => String(a)).join(" "));
 	}
 }
 
 /**
- * Execute a command and return stdout
- * @param stdinContent - Optional content to pass via stdin (useful for multi-line prompts on Windows)
- */
-export async function execCommand(
-	command: string,
-	args: string[],
-	workDir: string,
-	env?: Record<string, string>,
-	stdinContent?: string,
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	if (isBun) {
-		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
-		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
-		const proc = Bun.spawn(spawnArgs, {
-			cwd: workDir,
-			stdin: stdinContent ? "pipe" : "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, ...env },
-		});
-
-		// Write stdin content if provided
-		if (stdinContent && proc.stdin) {
-			proc.stdin.write(stdinContent);
-			proc.stdin.end();
-		}
-
-		const [stdout, stderr, exitCode] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-			proc.exited,
-		]);
-
-		return { stdout, stderr, exitCode };
-	}
-
-	// Node.js fallback - use shell on Windows to execute .cmd wrappers
-	return new Promise((resolve) => {
-		const proc = spawn(command, args, {
-			cwd: workDir,
-			env: { ...process.env, ...env },
-			stdio: [stdinContent ? "pipe" : "ignore", "pipe", "pipe"],
-			shell: isWindows, // Required on Windows for npm global commands (.cmd wrappers)
-		});
-
-		// Write stdin content if provided
-		if (stdinContent && proc.stdin) {
-			proc.stdin.write(stdinContent);
-			proc.stdin.end();
-		}
-
-		let stdout = "";
-		let stderr = "";
-
-		proc.stdout?.on("data", (data) => {
-			stdout += data.toString();
-		});
-
-		proc.stderr?.on("data", (data) => {
-			stderr += data.toString();
-		});
-
-		proc.on("close", (exitCode) => {
-			resolve({ stdout, stderr, exitCode: exitCode ?? 1 });
-		});
-
-		proc.on("error", (err) => {
-			// Maintain backward compatibility - don't reject, include error in stderr
-			stderr += `\nSpawn error: ${err.message}`;
-			resolve({ stdout, stderr, exitCode: 1 });
-		});
-	});
-}
-
-/**
- * Parse token counts from stream-json output (Claude/Qwen format)
- */
-export function parseStreamJsonResult(output: string): {
-	response: string;
-	inputTokens: number;
-	outputTokens: number;
-} {
-	const lines = output.split("\n").filter(Boolean);
-	let response = "";
-	let inputTokens = 0;
-	let outputTokens = 0;
-
-	for (const line of lines) {
-		try {
-			const parsed = JSON.parse(line);
-			if (parsed.type === "result") {
-				response = parsed.result || "Task completed";
-				inputTokens = parsed.usage?.input_tokens || 0;
-				outputTokens = parsed.usage?.output_tokens || 0;
-			}
-		} catch {
-			// Ignore non-JSON lines
-		}
-	}
-
-	return { response: response || "Task completed", inputTokens, outputTokens };
-}
-
-/**
- * Check for errors in stream-json output
- */
-export function checkForErrors(output: string): string | null {
-	const lines = output.split("\n").filter(Boolean);
-
-	for (const line of lines) {
-		try {
-			const parsed = JSON.parse(line);
-			if (parsed.type === "error") {
-				return parsed.error?.message || parsed.message || "Unknown error";
-			}
-		} catch {
-			// Ignore non-JSON lines
-		}
-	}
-
-	return null;
-}
-
-/**
- * Extract authentication error message from stream-json output.
- * Looks for error type messages or result messages with authentication-related keywords.
- * Returns the clean error message if found, null otherwise.
- */
-export function extractAuthenticationError(output: string): string | null {
-	const lines = output.split("\n").filter(Boolean);
-
-	for (const line of lines) {
-		try {
-			const parsed = JSON.parse(line);
-
-			// Check if this is any kind of error response
-			if (
-				parsed.type === "error" ||
-				parsed.is_error === true ||
-				parsed.error === "authentication_failed"
-			) {
-				// Extract message from content array (assistant type) or standard fields
-				let message = "";
-				const content = parsed.message?.content;
-				if (Array.isArray(content)) {
-					const textItem = content.find(
-						(item: { type?: string; text?: string }) => item.type === "text" && item.text,
-					);
-					if (textItem) message = textItem.text;
-				}
-				if (!message) {
-					message = parsed.result || parsed.error?.message || parsed.message || "";
-				}
-
-				if (message && isAuthenticationMessage(message.toLowerCase())) {
-					return message;
-				}
-			}
-		} catch {
-			// Ignore non-JSON lines
-		}
-	}
-
-	return null;
-}
-
-/**
- * Check if a message contains authentication-related keywords
- */
-function isAuthenticationMessage(messageLower: string): boolean {
-	return (
-		messageLower.includes("invalid api key") ||
-		messageLower.includes("authentication") ||
-		messageLower.includes("not authenticated") ||
-		messageLower.includes("unauthorized") ||
-		messageLower.includes("/login")
-	);
-}
-
-/**
- * Format a command failure with useful output context.
- * If the output contains an authentication error, returns just that error message.
- * Otherwise returns the full error with output context.
- */
-export function formatCommandError(exitCode: number, output: string): string {
-	const trimmed = output.trim();
-	if (!trimmed) {
-		return `Command failed with exit code ${exitCode}`;
-	}
-
-	// Check for authentication errors first - return the clean message if found
-	const authError = extractAuthenticationError(output);
-	if (authError) {
-		return authError;
-	}
-
-	const lines = trimmed.split("\n").filter(Boolean);
-	const snippet = lines.slice(-12).join("\n");
-	return `Command failed with exit code ${exitCode}. Output:\n${snippet}`;
-}
-
-/**
- * Read a stream line by line, calling onLine for each non-empty line
- */
-async function readStream(
-	stream: ReadableStream<Uint8Array>,
-	onLine: (line: string) => void,
-): Promise<void> {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
-			const lines = buffer.split("\n");
-			buffer = lines.pop() || "";
-			for (const line of lines) {
-				if (line.trim()) onLine(line);
-			}
-		}
-		if (buffer.trim()) onLine(buffer);
-	} finally {
-		reader.releaseLock();
-	}
-}
-
-/**
- * Execute a command with streaming output, calling onLine for each line
- * @param stdinContent - Optional content to pass via stdin (useful for multi-line prompts on Windows)
- */
-export async function execCommandStreaming(
-	command: string,
-	args: string[],
-	workDir: string,
-	onLine: (line: string) => void,
-	env?: Record<string, string>,
-	stdinContent?: string,
-): Promise<{ exitCode: number }> {
-	if (isBun) {
-		// On Windows, run through cmd.exe to handle .cmd wrappers (npm global packages)
-		const spawnArgs = isWindows ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
-		const proc = Bun.spawn(spawnArgs, {
-			cwd: workDir,
-			stdin: stdinContent ? "pipe" : "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, ...env },
-		});
-
-		// Write stdin content if provided
-		if (stdinContent && proc.stdin) {
-			proc.stdin.write(stdinContent);
-			proc.stdin.end();
-		}
-
-		// Process both stdout and stderr in parallel
-		await Promise.all([readStream(proc.stdout, onLine), readStream(proc.stderr, onLine)]);
-
-		const exitCode = await proc.exited;
-		return { exitCode };
-	}
-
-	// Node.js fallback - use shell on Windows to execute .cmd wrappers
-	return new Promise((resolve) => {
-		const proc = spawn(command, args, {
-			cwd: workDir,
-			env: { ...process.env, ...env },
-			stdio: [stdinContent ? "pipe" : "ignore", "pipe", "pipe"],
-			shell: isWindows, // Required on Windows for npm global commands (.cmd wrappers)
-		});
-
-		// Write stdin content if provided
-		if (stdinContent && proc.stdin) {
-			proc.stdin.write(stdinContent);
-			proc.stdin.end();
-		}
-
-		let stdoutBuffer = "";
-		let stderrBuffer = "";
-
-		const processBuffer = (buffer: string, isStderr = false) => {
-			const lines = buffer.split("\n");
-			const remaining = lines.pop() || "";
-			for (const line of lines) {
-				if (line.trim()) onLine(line);
-			}
-			return remaining;
-		};
-
-		proc.stdout?.on("data", (data) => {
-			stdoutBuffer += data.toString();
-			stdoutBuffer = processBuffer(stdoutBuffer);
-		});
-
-		proc.stderr?.on("data", (data) => {
-			stderrBuffer += data.toString();
-			stderrBuffer = processBuffer(stderrBuffer, true);
-		});
-
-		proc.on("close", (exitCode) => {
-			// Process any remaining data
-			if (stdoutBuffer.trim()) onLine(stdoutBuffer);
-			if (stderrBuffer.trim()) onLine(stderrBuffer);
-			resolve({ exitCode: exitCode ?? 1 });
-		});
-
-		proc.on("error", (err) => {
-			// Maintain backward compatibility - don't reject, report error via onLine
-			onLine(`Spawn error: ${err.message}`);
-			resolve({ exitCode: 1 });
-		});
-	});
-}
-
-/**
- * Check if a file path looks like a test file
- */
-function isTestFile(filePath: string): boolean {
-	const lower = filePath.toLowerCase();
-	return (
-		lower.includes(".test.") ||
-		lower.includes(".spec.") ||
-		lower.includes("__tests__") ||
-		lower.includes("_test.go")
-	);
-}
-
-/**
- * Detect the current step from a JSON output line
- * Returns step name like "Reading code", "Implementing", etc.
- */
-export function detectStepFromOutput(line: string): string | null {
-	// Fast path: skip non-JSON lines
-	const trimmed = line.trim();
-	if (!trimmed.startsWith("{")) {
-		return null;
-	}
-
-	try {
-		const parsed = JSON.parse(trimmed);
-
-		// Extract specific fields for pattern matching (avoid stringifying entire object)
-		const toolName =
-			parsed.tool?.toLowerCase() ||
-			parsed.name?.toLowerCase() ||
-			parsed.tool_name?.toLowerCase() ||
-			"";
-		const command = parsed.command?.toLowerCase() || "";
-		const filePath = (parsed.file_path || parsed.filePath || parsed.path || "").toLowerCase();
-		const description = (parsed.description || "").toLowerCase();
-
-		// Check tool name first to determine operation type
-		const isReadOperation = toolName === "read" || toolName === "glob" || toolName === "grep";
-		const isWriteOperation = toolName === "write" || toolName === "edit";
-
-		// Reading code - check this early to avoid misclassifying reads of test files
-		if (isReadOperation) {
-			return "Reading code";
-		}
-
-		// Git commit
-		if (command.includes("git commit") || description.includes("git commit")) {
-			return "Committing";
-		}
-
-		// Git add/staging
-		if (command.includes("git add") || description.includes("git add")) {
-			return "Staging";
-		}
-
-		// Linting - check command for lint tools
-		if (
-			command.includes("lint") ||
-			command.includes("eslint") ||
-			command.includes("biome") ||
-			command.includes("prettier")
-		) {
-			return "Linting";
-		}
-
-		// Testing - check command for test runners
-		if (
-			command.includes("vitest") ||
-			command.includes("jest") ||
-			command.includes("bun test") ||
-			command.includes("npm test") ||
-			command.includes("pytest") ||
-			command.includes("go test")
-		) {
-			return "Testing";
-		}
-
-		// Writing tests - only for write operations to test files
-		if (isWriteOperation && isTestFile(filePath)) {
-			return "Writing tests";
-		}
-
-		// Writing/Editing code
-		if (isWriteOperation) {
-			return "Implementing";
-		}
-
-		return null;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Base implementation for AI engines
+ * Base AI Engine implementation
  */
 export abstract class BaseAIEngine implements AIEngine {
 	abstract name: string;
 	abstract cliCommand: string;
 
+	/**
+	 * Check if the CLI command is available
+	 */
 	async isAvailable(): Promise<boolean> {
-		return commandExists(this.cliCommand);
+		debugLog(`isAvailable: Checking if '${this.cliCommand}' (${this.name}) is available...`);
+		const result = await commandExists(this.cliCommand);
+		debugLog(`isAvailable: '${this.cliCommand}' (${this.name}) available = ${result}`);
+		return result;
 	}
 
-	abstract execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult>;
+	/**
+	 * Build CLI arguments for engine
+	 */
+	protected abstract buildArgs(prompt: string, workDir: string, options?: EngineOptions): string[];
+
+	/**
+	 * Process CLI output into AIResult
+	 */
+	protected abstract processCliResult(
+		stdout: string,
+		stderr: string,
+		exitCode: number,
+		workDir: string,
+	): AIResult;
+
+	/**
+	 * Get environment variables for engine
+	 */
+	protected getEnv(options?: EngineOptions): Record<string, string> | undefined {
+		return options?.env;
+	}
+
+	/**
+	 * Whether prompt should be passed through stdin.
+	 * Engines that pass prompts via temp files should override this to false.
+	 */
+	protected useStdin(): boolean {
+		return true;
+	}
+
+	/**
+	 * Build args array with stdin handling
+	 * Prompts are passed via stdin to avoid shell escaping issues and ensure
+	 * cross-platform compatibility (Windows, Linux, macOS)
+	 */
+	protected buildArgsWithStdin(
+		baseArgs: string[],
+		prompt: string,
+	): { args: string[]; stdinContent?: string } {
+		// Always use stdin for prompts - this is the most reliable cross-platform approach
+		// It avoids shell escaping issues and command line length limits on all platforms
+		return { args: baseArgs, stdinContent: prompt };
+	}
 
 	/**
 	 * Execute with streaming progress updates (optional implementation)
 	 */
-	executeStreaming?(
+	async executeStreaming(
 		prompt: string,
 		workDir: string,
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
-	): Promise<AIResult>;
+	): Promise<AIResult> {
+		if (options?.dryRun) {
+			onProgress("Skipped (dry run)");
+			return { success: true, response: "(dry run) Skipped", inputTokens: 0, outputTokens: 0 };
+		}
+
+		const args = this.buildArgs(prompt, workDir, options);
+		const env = this.getEnv(options);
+
+		// Always use stdin for prompts - most reliable cross-platform approach
+		const stdinContent = this.useStdin() ? prompt : undefined;
+
+		debugLog(`Starting ${this.name} engine with ${this.cliCommand}`);
+		debugLog(`WorkDir: ${workDir}`);
+		debugLog(`Args: ${args.join(" ")}`);
+
+		const timeout = Number.parseInt(
+			process.env.RALPHY_EXECUTION_TIMEOUT || String(DEFAULT_AI_ENGINE_TIMEOUT_MS),
+			10,
+		);
+		debugLog(`Timeout set to: ${Math.floor(timeout / 1000)}s`);
+
+		let timedOut = false;
+		let childProcess: import("./types.ts").ChildProcess | null = null;
+		const timeoutId = setTimeout(() => {
+			timedOut = true;
+			onProgress(
+				`[Warning: Process taking longer than ${Math.floor(timeout / 1000 / 60)} minutes...]`,
+			);
+			debugLog(`Timeout reached after ${timeout}ms`);
+
+			// BUG FIX: Check childProcess exists before attempting to kill
+			// This prevents errors when timeout fires before process is assigned (fallback case)
+			if (childProcess && typeof childProcess.kill === "function") {
+				debugLog("Killing child process due to timeout");
+				try {
+					childProcess.kill();
+				} catch (killErr) {
+					debugLog(`Failed to kill child process: ${killErr}`);
+				}
+			}
+		}, timeout);
+
+		try {
+			const result = await execCommandStreamingNew(
+				this.cliCommand,
+				args,
+				workDir,
+				env,
+				stdinContent,
+			);
+
+			childProcess = result.process;
+			let stdout = "";
+			let stderr = "";
+			let exitCode = 0;
+
+			if (result.stdout?.getReader && result.stderr?.getReader) {
+				const stdoutReader = result.stdout.getReader();
+				const stderrReader = result.stderr.getReader();
+
+				const readStdout = async () => {
+					try {
+						while (true) {
+							const { done, value } = await stdoutReader.read();
+							if (done) break;
+							const chunk = new TextDecoder().decode(value);
+							stdout += chunk;
+
+							const lines = chunk.split("\n");
+							for (const line of lines) {
+								if (line.trim()) {
+									const step = this.parseProgressLine(line, options?.logThoughts);
+									if (step) {
+										onProgress(step);
+									}
+								}
+							}
+						}
+					} catch (err) {
+						debugLog(`Error reading stdout: ${err}`);
+					}
+				};
+
+				const readStderr = async () => {
+					try {
+						while (true) {
+							const { done, value } = await stderrReader.read();
+							if (done) break;
+							const chunk = new TextDecoder().decode(value);
+							stderr += chunk;
+						}
+					} catch (err) {
+						debugLog(`Error reading stderr: ${err}`);
+					}
+				};
+
+				const exitedPromise = childProcess?.exited
+					? childProcess.exited
+					: new Promise<number>((resolve) => {
+							const nodeProcess = childProcess as unknown as ChildProcess;
+							nodeProcess.once("close", (code) => resolve(code ?? 1));
+							nodeProcess.once("error", () => resolve(1));
+						});
+
+				const [resolvedExitCode] = await Promise.all([exitedPromise, readStdout(), readStderr()]);
+				exitCode = resolvedExitCode ?? 1;
+			} else {
+				// BUG FIX: Use stdinContent instead of undefined 'needsStdin' variable
+				const result = await execCommand(this.cliCommand, args, workDir, env, stdinContent);
+				stdout = result.stdout;
+				stderr = result.stderr;
+				exitCode = result.exitCode;
+			}
+
+			clearTimeout(timeoutId);
+
+			if (timedOut) {
+				return {
+					success: false,
+					response: "",
+					inputTokens: 0,
+					outputTokens: 0,
+					error: `Execution timed out after ${Math.floor(timeout / 1000 / 60)} minutes`,
+				};
+			}
+
+			return this.processCliResult(stdout, stderr, exitCode, workDir);
+		} catch (error) {
+			clearTimeout(timeoutId);
+			debugLog(`Error in executeStreaming: ${error}`);
+			return {
+				success: false,
+				response: "",
+				inputTokens: 0,
+				outputTokens: 0,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	/**
+	 * Execute the AI engine (non-streaming)
+	 */
+	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+		if (options?.dryRun) {
+			return { success: true, response: "(dry run) Skipped", inputTokens: 0, outputTokens: 0 };
+		}
+
+		const args = this.buildArgs(prompt, workDir, options);
+		const env = this.getEnv(options);
+
+		// Always use stdin for prompts - most reliable cross-platform approach
+		const stdinContent = this.useStdin() ? prompt : undefined;
+
+		debugLog(`Starting ${this.name} engine (non-streaming)`);
+		debugLog(`WorkDir: ${workDir}`);
+		debugLog(`Args: ${args.join(" ")}`);
+
+		try {
+			const result = await execCommand(this.cliCommand, args, workDir, env, stdinContent);
+
+			return this.processCliResult(result.stdout, result.stderr, result.exitCode, workDir);
+		} catch (error) {
+			debugLog(`Error in execute: ${error}`);
+			return {
+				success: false,
+				response: "",
+				inputTokens: 0,
+				outputTokens: 0,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	/**
+	 * Parse a line of output to extract progress information
+	 */
+	protected parseProgressLine(line: string, logThoughts?: boolean): string | null {
+		if (line.trim().startsWith("{")) {
+			try {
+				const parsed = parseJsonLine(line);
+				if (parsed) {
+					if (ErrorSchema.safeParse(parsed.event).success) {
+						return null;
+					}
+
+					const event = parsed.event as Record<string, unknown>;
+					if (event.type === "text" && event.part && typeof event.part === "object") {
+						const part = event.part as { text?: string };
+						if (part.text) {
+							const step = detectStepFromOutput(part.text, logThoughts);
+							if (step) return step;
+						}
+					}
+				}
+			} catch {
+				// Not valid JSON, continue to plain text parsing
+			}
+		}
+
+		const step = detectStepFromOutput(line, logThoughts);
+		if (step) return step;
+
+		const parsed = parseAIStep(line);
+		if (parsed && !line.includes("[ERROR")) {
+			return formatParsedStep(parsed);
+		}
+
+		return null;
+	}
 }

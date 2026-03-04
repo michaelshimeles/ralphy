@@ -1,92 +1,48 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logDebug } from "../ui/logger.ts";
-import { BaseAIEngine, checkForErrors, execCommand, formatCommandError } from "./base.ts";
-import type { AIResult, EngineOptions } from "./types.ts";
-
-/** Directory for temporary prompt files */
-const TEMP_DIR = join(tmpdir(), "ralphy-copilot");
+import { BaseAIEngine, checkForErrors, execCommand, execCommandStreaming } from "./base.ts";
+import { detectStepFromOutput, formatCommandError } from "./parsers.ts";
+import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
 
 /**
  * GitHub Copilot CLI AI Engine
- *
- * Note: executeStreaming is intentionally not implemented for Copilot
- * because the streaming function can hang on Windows due to how
- * Bun handles cmd.exe stream completion. The non-streaming execute()
- * method works reliably.
- *
- * Note: All engine output is captured internally for parsing and not displayed
- * to the end user. This is by design - the spinner shows step progress while
- * the actual CLI output is processed silently.
- *
- * Note: Prompts are passed via temporary files to preserve markdown formatting.
- * The -p parameter accepts a file path, which avoids shell escaping issues and
- * maintains the full structure of markdown (newlines, code blocks, etc.) that
- * would be lost if passed as a command line string.
  */
 export class CopilotEngine extends BaseAIEngine {
 	name = "GitHub Copilot";
 	cliCommand = "copilot";
-
-	/**
-	 * Create a temporary file containing the prompt.
-	 * Uses a unique filename to support parallel execution.
-	 * @returns The path to the temporary prompt file
-	 */
-	private createPromptFile(prompt: string): string {
-		// Ensure temp directory exists - wrapped in try-catch to handle
-		// potential race conditions when multiple processes create it simultaneously
-		try {
-			mkdirSync(TEMP_DIR, { recursive: true });
-		} catch (err) {
-			// EEXIST is expected if another process created the directory first
-			if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-				throw err;
-			}
-		}
-
-		// Generate unique filename using UUID for parallel safety
-		const filename = `prompt-${randomUUID()}.md`;
-		const filepath = join(TEMP_DIR, filename);
-
-		// Write prompt to file preserving all formatting
-		writeFileSync(filepath, prompt, "utf-8");
-		logDebug(`[Copilot] Created prompt file: ${filepath}`);
-
-		return filepath;
-	}
-
-	/**
-	 * Clean up a temporary prompt file
-	 */
-	private cleanupPromptFile(filepath: string): void {
-		try {
-			unlinkSync(filepath);
-			logDebug(`[Copilot] Cleaned up prompt file: ${filepath}`);
-		} catch (err) {
-			// Ignore cleanup errors - file may already be deleted
-			logDebug(`[Copilot] Failed to cleanup prompt file: ${filepath}`);
-		}
-	}
+	private tempDir = join(tmpdir(), "ralphy-copilot");
 
 	/**
 	 * Build command arguments for Copilot CLI
-	 * @param promptFilePath Path to the temporary file containing the prompt
+	 * Returns args array and optional stdin content for Windows
 	 */
-	private buildArgs(promptFilePath: string, options?: EngineOptions): { args: string[] } {
+	protected buildArgs(prompt: string, _workDir: string, options?: EngineOptions): string[] {
+		const { args } = this.buildArgsInternal(prompt, options);
+		return args;
+	}
+
+	protected useStdin(): boolean {
+		return false;
+	}
+
+	private buildArgsInternal(
+		prompt: string,
+		options?: EngineOptions,
+	): { args: string[]; stdinContent?: string } {
 		const args: string[] = [];
 
-		// Use --yolo for non-interactive mode (allows all tools and paths)
+		// Add --yolo flag for non-interactive mode
 		args.push("--yolo");
 
-		// Pass prompt file path (Copilot CLI accepts file paths for -p)
-		// NOTE: This is an undocumented feature of Copilot CLI but works reliably
-		// since copilot is smart enough to detect file paths and read the content.
-		// Do NOT quote the path - arguments are passed directly without shell interpretation
-		// on non-Windows platforms, so quotes would become literal characters in the path.
-		args.push("-p", promptFilePath);
+		// Copilot uses -p flag for prompt file
+		args.push("-p");
+
+		// Create temp file with prompt content
+		const tempFile = this.createTempFile(prompt);
+		args.push(tempFile);
 
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
@@ -98,66 +54,121 @@ export class CopilotEngine extends BaseAIEngine {
 		return { args };
 	}
 
-	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
-		// Create temporary prompt file to preserve markdown formatting
-		const promptFilePath = this.createPromptFile(prompt);
+	private createTempFile(prompt: string): string {
+		this.cleanupOldTempFiles();
 
+		// Ensure temp directory exists
+		if (!existsSync(this.tempDir)) {
+			mkdirSync(this.tempDir, { recursive: true });
+		}
+
+		// Create unique filename
+		const uuid = randomUUID();
+		const tempFile = join(this.tempDir, `prompt-${uuid}.md`);
+
+		// Write prompt to file
+		writeFileSync(tempFile, prompt, "utf-8");
+
+		return tempFile;
+	}
+
+	private cleanupTempFile(filePath: string | undefined): void {
+		if (!filePath) return;
 		try {
-			const { args } = this.buildArgs(promptFilePath, options);
+			if (existsSync(filePath)) {
+				rmSync(filePath);
+			}
+		} catch (err) {
+			logDebug(`Failed to cleanup temp file: ${err}`);
+		}
+	}
 
-			// Debug logging
-			logDebug(`[Copilot] Working directory: ${workDir}`);
-			logDebug(`[Copilot] Prompt length: ${prompt.length} chars`);
-			logDebug(`[Copilot] Prompt preview: ${prompt.substring(0, 200)}...`);
-			logDebug(`[Copilot] Prompt file: ${promptFilePath}`);
-			logDebug(`[Copilot] Command: ${this.cliCommand} ${args.join(" ")}`);
+	private getAuthenticationError(output: string): string | null {
+		const firstLine = output.split("\n")[0]?.trim().toLowerCase() || "";
+		if (firstLine.startsWith("not authenticated") || firstLine.startsWith("no authentication")) {
+			return "GitHub Copilot is not authenticated. Please run `gh auth login` or check your Copilot subscription.";
+		}
+		return null;
+	}
 
-			const startTime = Date.now();
-			const { stdout, stderr, exitCode } = await execCommand(this.cliCommand, args, workDir);
+	/**
+	 * Cleanup temp files older than 1 hour to prevent disk space exhaustion
+	 */
+	private cleanupOldTempFiles(): void {
+		try {
+			if (!existsSync(this.tempDir)) return;
+			const files = readdirSync(this.tempDir);
+			const oneHourAgo = Date.now() - 60 * 60 * 1000;
+			for (const file of files) {
+				const filePath = join(this.tempDir, file);
+				try {
+					const stats = statSync(filePath);
+					if (stats.mtimeMs < oneHourAgo) {
+						rmSync(filePath);
+					}
+				} catch {
+					// File may have been deleted, skip
+				}
+			}
+		} catch (err) {
+			logDebug(`Failed to cleanup old temp files: ${err}`);
+		}
+	}
+
+	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
+		let tempFile: string | undefined;
+
+		const startTime = Date.now();
+		try {
+			const { args } = this.buildArgsInternal(prompt, options);
+			const pIndex = args.indexOf("-p");
+			tempFile = pIndex >= 0 && pIndex < args.length - 1 ? args[pIndex + 1] : undefined;
+
+			const { stdout, stderr, exitCode } = await execCommand(
+				this.cliCommand,
+				args,
+				workDir,
+				this.getEnv(options),
+			);
 			const durationMs = Date.now() - startTime;
 
 			const output = stdout + stderr;
 
-			// Debug logging
-			logDebug(`[Copilot] Exit code: ${exitCode}`);
-			logDebug(`[Copilot] Duration: ${durationMs}ms`);
-			logDebug(`[Copilot] Output length: ${output.length} chars`);
-			logDebug(`[Copilot] Output preview: ${output.substring(0, 500)}...`);
-
-			// Check for JSON errors (from base)
-			const jsonError = checkForErrors(output);
-			if (jsonError) {
+			// Check for authentication errors first (check first line only)
+			const authError = this.getAuthenticationError(output);
+			if (authError) {
 				return {
 					success: false,
 					response: "",
 					inputTokens: 0,
 					outputTokens: 0,
-					error: jsonError,
+					error: authError,
 				};
 			}
 
-			// Check for Copilot-specific errors (plain text)
-			const copilotError = this.checkCopilotErrors(output);
-			if (copilotError) {
+			// Check for errors
+			const error = checkForErrors(output);
+			if (error) {
 				return {
 					success: false,
 					response: "",
 					inputTokens: 0,
 					outputTokens: 0,
-					error: copilotError,
+					error,
 				};
 			}
 
-			// Parse Copilot output - extract response and token counts
-			const { response, inputTokens, outputTokens } = this.parseOutput(output);
+			// Parse Copilot output - extract response from output
+			const response = this.parseOutput(output);
+			const tokenCounts = this.parseTokenCounts(output);
 
 			// If command failed with non-zero exit code, provide a meaningful error
 			if (exitCode !== 0) {
 				return {
 					success: false,
 					response,
-					inputTokens,
-					outputTokens,
+					inputTokens: tokenCounts.input,
+					outputTokens: tokenCounts.output,
 					error: formatCommandError(exitCode, output),
 				};
 			}
@@ -165,105 +176,46 @@ export class CopilotEngine extends BaseAIEngine {
 			return {
 				success: true,
 				response,
-				inputTokens,
-				outputTokens,
+				inputTokens: tokenCounts.input,
+				outputTokens: tokenCounts.output,
 				cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
 			};
 		} finally {
-			// Always clean up the temporary prompt file
-			this.cleanupPromptFile(promptFilePath);
+			// Always clean up temp file
+			this.cleanupTempFile(tempFile);
 		}
 	}
 
-	/**
-	 * Check for Copilot-specific errors in output
-	 *
-	 * IMPORTANT: We are intentionally very conservative with error detection here.
-	 * We don't have documentation on Copilot CLI's error response formats, exit codes,
-	 * or error messages. The response content might contain strings like "network error",
-	 * "error:", "rate limit", etc. as part of valid output (e.g., test results, error
-	 * handling discussions, feedback about code). We only detect errors that we have
-	 * actually observed in practice.
-	 *
-	 * Currently known error: Authentication errors (observed when not logged in)
-	 */
-	private checkCopilotErrors(output: string): string | null {
-		const trimmed = output.trim();
-		const trimmedLower = trimmed.toLowerCase();
+	private parseTokenCounts(output: string): { input: number; output: number } {
+		const lines = output.split("\n");
+		for (const line of lines) {
+			// Match pattern: "model-name X in, Y out, Z cached" or variations
+			// Using atomic grouping to prevent ReDoS - \d+\.?\d* matches numbers without catastrophic backtracking
+			const match = line.match(/(\d+\.?\d*)([km]?)\s+in,\s+(\d+\.?\d*)([km]?)\s+out/i);
+			if (match) {
+				let input = Number.parseFloat(match[1]);
+				let output = Number.parseFloat(match[3]);
 
-		// Authentication errors - the only error format we've actually observed
-		// When not authenticated, Copilot CLI outputs a message starting with these phrases
-		if (
-			trimmedLower.startsWith("no authentication") ||
-			trimmedLower.startsWith("not authenticated") ||
-			trimmedLower.startsWith("authentication required") ||
-			trimmedLower.startsWith("please authenticate")
-		) {
-			return "GitHub Copilot CLI is not authenticated. Run 'copilot' and use '/login' to authenticate, or set COPILOT_GITHUB_TOKEN environment variable.";
+				// Handle k/m suffixes
+				if (match[2] === "k") input *= 1000;
+				if (match[2] === "m") input *= 1000000;
+				if (match[4] === "k") output *= 1000;
+				if (match[4] === "m") output *= 1000000;
+
+				return { input: Math.round(input), output: Math.round(output) };
+			}
 		}
-
-		// Note: We intentionally do NOT check for:
-		// - "rate limit" / "too many requests" - unknown format, could appear in response content
-		// - "network error" / "connection refused" - unknown format, could appear in response content
-		// - "error:" prefix - too generic, could appear in response content
-		// - Non-zero exit codes - we don't know if Copilot uses them for errors
-		//
-		// If we encounter other error patterns in practice, we can add them here.
-
-		return null;
+		return { input: 0, output: 0 };
 	}
 
-	/**
-	 * Parse a token count string like "17.5k" or "73" into a number
-	 */
-	private parseTokenCount(str: string): number {
-		const trimmed = str.trim().toLowerCase();
-		if (trimmed.endsWith("k")) {
-			const value = Number.parseFloat(trimmed.slice(0, -1));
-			return Number.isNaN(value) ? 0 : Math.round(value * 1000);
-		}
-		if (trimmed.endsWith("m")) {
-			const value = Number.parseFloat(trimmed.slice(0, -1));
-			return Number.isNaN(value) ? 0 : Math.round(value * 1000000);
-		}
-		const value = Number.parseFloat(trimmed);
-		return Number.isNaN(value) ? 0 : Math.round(value);
-	}
-
-	/**
-	 * Extract token counts from Copilot CLI output
-	 * Format: "model-name       17.5k in, 73 out, 11.8k cached (Est. 1 Premium request)"
-	 */
-	private parseTokenCounts(output: string): { inputTokens: number; outputTokens: number } {
-		// Look for the token count line in the "Breakdown by AI model" section
-		// Pattern: number followed by "in," and number followed by "out,"
-		const tokenMatch = output.match(/(\d+(?:\.\d+)?[km]?)\s+in,\s+(\d+(?:\.\d+)?[km]?)\s+out/i);
-
-		if (tokenMatch) {
-			const inputTokens = this.parseTokenCount(tokenMatch[1]);
-			const outputTokens = this.parseTokenCount(tokenMatch[2]);
-			logDebug(`[Copilot] Parsed tokens: ${inputTokens} in, ${outputTokens} out`);
-			return { inputTokens, outputTokens };
-		}
-
-		return { inputTokens: 0, outputTokens: 0 };
-	}
-
-	private parseOutput(output: string): {
-		response: string;
-		inputTokens: number;
-		outputTokens: number;
-	} {
-		// Extract token counts first
-		const { inputTokens, outputTokens } = this.parseTokenCounts(output);
-
+	private parseOutput(output: string): string {
 		// Copilot CLI may output text responses
 		// Extract the meaningful response, filtering out control characters and prompts
 		// Note: These filter patterns are specific to current Copilot CLI behavior
 		// and may need updates if the CLI output format changes
 		const lines = output.split("\n").filter(Boolean);
 
-		// Filter out empty lines, CLI artifacts, and stats section
+		// Filter out empty lines and common CLI artifacts
 		const meaningfulLines = lines.filter((line) => {
 			const trimmed = line.trim();
 			return (
@@ -272,18 +224,149 @@ export class CopilotEngine extends BaseAIEngine {
 				!trimmed.startsWith("❯") && // Command prompts
 				!trimmed.includes("Thinking...") && // Status messages
 				!trimmed.includes("Working on it...") && // Status messages
-				!trimmed.startsWith("Total usage") && // Stats section
-				!trimmed.startsWith("API time") && // Stats section
-				!trimmed.startsWith("Total session") && // Stats section
-				!trimmed.startsWith("Total code") && // Stats section
-				!trimmed.startsWith("Breakdown by") && // Stats section header
-				!trimmed.match(
-					/^\s*\S+\s+\d+(?:\.\d+)?[km]?\s+in,\s+\d+(?:\.\d+)?[km]?\s+out,\s+\d+(?:\.\d+)?[km]?\s+cached/,
-				) // Token count lines (model stats: "model-name 17.5k in, 73 out, 11.8k cached")
+				!trimmed.match(/^\S+\s+\d+(\.\d+)?[km]?\s+in,\s+\d+(\.\d+)?[km]?\s+out/i) && // Token count lines
+				!trimmed.match(/^Total usage:\s*\d+\s*tokens/i) // Total usage lines
 			);
 		});
 
-		const response = meaningfulLines.join("\n").trim() || "Task completed";
-		return { response, inputTokens, outputTokens };
+		return meaningfulLines.join("\n") || "Task completed";
+	}
+
+	async executeStreaming(
+		prompt: string,
+		workDir: string,
+		onProgress: ProgressCallback,
+		options?: EngineOptions,
+	): Promise<AIResult> {
+		let tempFile: string | undefined;
+
+		const outputLines: string[] = [];
+		const startTime = Date.now();
+
+		try {
+			const { args } = this.buildArgsInternal(prompt, options);
+			const pIndex = args.indexOf("-p");
+			tempFile = pIndex >= 0 && pIndex < args.length - 1 ? args[pIndex + 1] : undefined;
+
+			const { exitCode } = await execCommandStreaming(
+				this.cliCommand,
+				args,
+				workDir,
+				(line) => {
+					outputLines.push(line);
+
+					// Detect and report step changes
+					const step = detectStepFromOutput(line);
+					if (step) {
+						onProgress(step);
+					}
+				},
+				this.getEnv(options),
+			);
+
+			const durationMs = Date.now() - startTime;
+			const output = outputLines.join("\n");
+
+			const authError = this.getAuthenticationError(output);
+			if (authError) {
+				return {
+					success: false,
+					response: "",
+					inputTokens: 0,
+					outputTokens: 0,
+					error: authError,
+				};
+			}
+
+			// Check for errors
+			const error = checkForErrors(output);
+			if (error) {
+				return {
+					success: false,
+					response: "",
+					inputTokens: 0,
+					outputTokens: 0,
+					error,
+				};
+			}
+
+			// Parse Copilot output
+			const response = this.parseOutput(output);
+			const tokenCounts = this.parseTokenCounts(output);
+
+			// If command failed with non-zero exit code, provide a meaningful error
+			if (exitCode !== 0) {
+				return {
+					success: false,
+					response,
+					inputTokens: tokenCounts.input,
+					outputTokens: tokenCounts.output,
+					error: formatCommandError(exitCode, output),
+				};
+			}
+
+			return {
+				success: true,
+				response,
+				inputTokens: tokenCounts.input,
+				outputTokens: tokenCounts.output,
+				cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
+			};
+		} finally {
+			// Always clean up temp file
+			this.cleanupTempFile(tempFile);
+		}
+	}
+
+	protected processCliResult(
+		stdout: string,
+		stderr: string,
+		exitCode: number,
+		_workDir: string,
+	): AIResult {
+		const output = stdout + stderr;
+		const response = this.parseOutput(output);
+		const tokenCounts = this.parseTokenCounts(output);
+
+		// Check for auth errors first (check first line only)
+		const authError = this.getAuthenticationError(output);
+		if (authError) {
+			return {
+				success: false,
+				response,
+				inputTokens: tokenCounts.input,
+				outputTokens: tokenCounts.output,
+				error: authError,
+			};
+		}
+
+		// Check for CLI errors
+		const error = checkForErrors(output);
+		if (error) {
+			return {
+				success: false,
+				response,
+				inputTokens: tokenCounts.input,
+				outputTokens: tokenCounts.output,
+				error,
+			};
+		}
+
+		if (exitCode !== 0) {
+			return {
+				success: false,
+				response,
+				inputTokens: tokenCounts.input,
+				outputTokens: tokenCounts.output,
+				error: formatCommandError(exitCode, output),
+			};
+		}
+
+		return {
+			success: true,
+			response,
+			inputTokens: tokenCounts.input,
+			outputTokens: tokenCounts.output,
+		};
 	}
 }

@@ -515,7 +515,7 @@ o1-preview 1.5m in, 0.5m out, 0.1m cached`,
 
 			expect(result.success).toBe(false);
 			expect(result.error).toContain("not authenticated");
-			expect(result.error).toContain("/login");
+			expect(result.error).toContain("gh auth login");
 
 			spy.mockRestore();
 		});
