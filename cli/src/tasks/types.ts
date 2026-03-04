@@ -10,6 +10,10 @@ export interface Task {
 	body?: string;
 	/** Parallel group number (0 = sequential, >0 = can run in parallel with same group) */
 	parallelGroup?: number;
+	/** Optional description from PRD */
+	description?: string;
+	/** Optional dependencies (task IDs) */
+	dependencies?: string[];
 	/** Whether the task is completed */
 	completed: boolean;
 }
@@ -17,7 +21,7 @@ export interface Task {
 /**
  * Task source type
  */
-export type TaskSourceType = "markdown" | "markdown-folder" | "yaml" | "json" | "github";
+export type TaskSourceType = "markdown" | "markdown-folder" | "yaml" | "csv" | "github" | "json";
 
 /**
  * Task source interface - one per format
@@ -37,4 +41,6 @@ export interface TaskSource {
 	countCompleted(): Promise<number>;
 	/** Get tasks in a specific parallel group */
 	getTasksInGroup?(group: number): Promise<Task[]>;
+	/** Get compact format of all tasks (for planning context) */
+	toCompactFormat?(): Promise<string>;
 }

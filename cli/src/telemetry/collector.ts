@@ -18,6 +18,40 @@ import type {
 // Package version (loaded lazily)
 let cachedVersion: string | undefined;
 
+function sanitizeSecrets(input: string): string {
+	const patterns = [
+		{ regex: /sk-[a-zA-Z0-9]{48}/g, replacement: "[API_KEY_REDACTED]" },
+		{ regex: /sk-ant-[a-zA-Z0-9_-]{16,256}/g, replacement: "[ANTHROPIC_KEY_REDACTED]" },
+		{ regex: /ghp_[a-zA-Z0-9]{36}/g, replacement: "[GITHUB_TOKEN_REDACTED]" },
+		{ regex: /gho_[a-zA-Z0-9]{52}/g, replacement: "[GITHUB_OAUTH_REDACTED]" },
+		{ regex: /AKIA[0-9A-Z]{16}/g, replacement: "[AWS_KEY_REDACTED]" },
+		{ regex: /\b[0-9a-f]{64}\b/g, replacement: "[HEX_SECRET_REDACTED]" },
+	];
+
+	let result = input;
+	for (const { regex, replacement } of patterns) {
+		result = result.replace(regex, replacement);
+	}
+	return result;
+}
+
+function sanitizeTelemetryValue(value: unknown): unknown {
+	if (typeof value === "string") {
+		return sanitizeSecrets(value);
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) => sanitizeTelemetryValue(item));
+	}
+	if (value && typeof value === "object") {
+		const sanitized: Record<string, unknown> = {};
+		for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+			sanitized[key] = sanitizeTelemetryValue(nested);
+		}
+		return sanitized;
+	}
+	return value;
+}
+
 function getCliVersion(): string {
 	if (cachedVersion) return cachedVersion;
 	try {
@@ -116,8 +150,8 @@ export class TelemetryCollector {
 
 		// Store prompts/responses for full mode
 		if (this.level === "full") {
-			if (prompt) this.prompts.push(prompt);
-			if (response) this.responses.push(response);
+			if (prompt) this.prompts.push(sanitizeSecrets(prompt));
+			if (response) this.responses.push(sanitizeSecrets(response));
 		}
 	}
 
@@ -131,7 +165,10 @@ export class TelemetryCollector {
 			startTime: Date.now(),
 			toolName,
 			parameterKeys: parameters ? Object.keys(parameters) : undefined,
-			parameters: this.level === "full" ? parameters : undefined,
+			parameters:
+				this.level === "full"
+					? (sanitizeTelemetryValue(parameters) as Record<string, unknown> | undefined)
+					: undefined,
 		};
 
 		// Track file paths in full mode
@@ -164,7 +201,7 @@ export class TelemetryCollector {
 		// Add full mode data
 		if (this.level === "full") {
 			toolCall.parameters = this.activeToolCall.parameters;
-			if (result) toolCall.result = result;
+			if (result) toolCall.result = sanitizeSecrets(result);
 		}
 
 		this.toolCalls.push(toolCall);
@@ -199,8 +236,10 @@ export class TelemetryCollector {
 		};
 
 		if (this.level === "full") {
-			toolCall.parameters = options?.parameters;
-			toolCall.result = options?.result;
+			toolCall.parameters = options?.parameters
+				? (sanitizeTelemetryValue(options.parameters) as Record<string, unknown>)
+				: undefined;
+			toolCall.result = options?.result ? sanitizeSecrets(options.result) : undefined;
 
 			// Track file paths
 			if (options?.parameters) {

@@ -40,19 +40,19 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		if (!existsSync(options.prdFile)) {
 			logError(`${options.prdFile} not found in current directory`);
 			logInfo(`Create a ${options.prdFile} file with tasks`);
-			process.exit(1);
+			throw new Error(`PRD source not found: ${options.prdFile}`);
 		}
 	} else if (options.prdSource === "markdown-folder") {
 		if (!existsSync(options.prdFile)) {
 			logError(`PRD folder ${options.prdFile} not found`);
 			logInfo(`Create a ${options.prdFile}/ folder with markdown files containing tasks`);
-			process.exit(1);
+			throw new Error(`PRD folder not found: ${options.prdFile}`);
 		}
 	}
 
 	if (options.prdSource === "github" && !options.githubRepo) {
 		logError("GitHub repository not specified. Use --github owner/repo");
-		process.exit(1);
+		throw new Error("GitHub repository not specified");
 	}
 
 	// Check engine availability
@@ -61,7 +61,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 
 	if (!available) {
 		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
+		throw new Error(`${engine.name} CLI not available`);
 	}
 
 	// Create task source with caching for better performance
@@ -91,7 +91,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			logError("Cannot run in parallel/branch mode: repository has no commits yet.");
 			logInfo("Please make an initial commit first:");
 			logInfo('  git add . && git commit -m "Initial commit"');
-			process.exit(1);
+			throw new Error("Repository has no commits yet");
 		}
 	}
 
@@ -195,6 +195,6 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	}
 
 	if (result.tasksFailed > 0) {
-		process.exit(1);
+		throw new Error(`${result.tasksFailed} task(s) failed`);
 	}
 }

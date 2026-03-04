@@ -1,5 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import simpleGit from "simple-git";
 import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
@@ -41,6 +41,30 @@ interface ParallelAgentResult {
 	usedSandbox?: boolean;
 }
 
+function resolveSafeRelativePath(baseDir: string, candidatePath: string): string | null {
+	if (!candidatePath || isAbsolute(candidatePath)) {
+		return null;
+	}
+
+	const normalized = normalize(candidatePath);
+	const resolved = resolve(baseDir, normalized);
+	const rel = relative(baseDir, resolved);
+
+	if (rel === "" || rel === ".") {
+		return normalized;
+	}
+
+	if (rel.startsWith(`..${sep}`) || rel === "..") {
+		return null;
+	}
+
+	if (isAbsolute(rel)) {
+		return null;
+	}
+
+	return rel;
+}
+
 /**
  * Run a single agent in a worktree
  */
@@ -66,6 +90,11 @@ async function runAgentInWorktree(
 	let branchName = "";
 
 	try {
+		const safePrdPath = resolveSafeRelativePath(originalDir, prdFile);
+		if (!safePrdPath) {
+			throw new Error(`Invalid PRD path outside project: ${prdFile}`);
+		}
+
 		// Create worktree
 		const worktree = await createAgentWorktree(
 			task.title,
@@ -80,16 +109,23 @@ async function runAgentInWorktree(
 		logDebug(`Agent ${agentNum}: Created worktree at ${worktreeDir}`);
 
 		// Copy PRD file or folder to worktree
-		if (prdSource === "markdown" || prdSource === "yaml" || prdSource === "json") {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(worktreeDir, prdFile);
+		if (
+			prdSource === "markdown" ||
+			prdSource === "yaml" ||
+			prdSource === "json" ||
+			prdSource === "csv"
+		) {
+			const srcPath = join(originalDir, safePrdPath);
+			const destPath = join(worktreeDir, safePrdPath);
 			if (existsSync(srcPath)) {
+				mkdirSync(dirname(destPath), { recursive: true });
 				copyFileSync(srcPath, destPath);
 			}
 		} else if (prdSource === "markdown-folder" && prdIsFolder) {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(worktreeDir, prdFile);
+			const srcPath = join(originalDir, safePrdPath);
+			const destPath = join(worktreeDir, safePrdPath);
 			if (existsSync(srcPath)) {
+				mkdirSync(dirname(destPath), { recursive: true });
 				cpSync(srcPath, destPath, { recursive: true });
 			}
 		}
@@ -161,6 +197,11 @@ async function runAgentInSandbox(
 	const branchName = "";
 
 	try {
+		const safePrdPath = resolveSafeRelativePath(originalDir, prdFile);
+		if (!safePrdPath) {
+			throw new Error(`Invalid PRD path outside project: ${prdFile}`);
+		}
+
 		// Create sandbox
 		const sandboxResult = await createSandbox({
 			originalDir,
@@ -173,16 +214,23 @@ async function runAgentInSandbox(
 		);
 
 		// Copy PRD file or folder to sandbox (same as worktree mode)
-		if (prdSource === "markdown" || prdSource === "yaml" || prdSource === "json") {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(sandboxDir, prdFile);
+		if (
+			prdSource === "markdown" ||
+			prdSource === "yaml" ||
+			prdSource === "json" ||
+			prdSource === "csv"
+		) {
+			const srcPath = join(originalDir, safePrdPath);
+			const destPath = join(sandboxDir, safePrdPath);
 			if (existsSync(srcPath)) {
+				mkdirSync(dirname(destPath), { recursive: true });
 				copyFileSync(srcPath, destPath);
 			}
 		} else if (prdSource === "markdown-folder" && prdIsFolder) {
-			const srcPath = join(originalDir, prdFile);
-			const destPath = join(sandboxDir, prdFile);
+			const srcPath = join(originalDir, safePrdPath);
+			const destPath = join(sandboxDir, safePrdPath);
 			if (existsSync(srcPath)) {
+				mkdirSync(dirname(destPath), { recursive: true });
 				cpSync(srcPath, destPath, { recursive: true });
 			}
 		}
@@ -380,13 +428,13 @@ export async function runParallel(
 
 		// Run agents in parallel (using sandbox or worktree mode)
 		const promises = batch.map((task) => {
-			globalAgentNum++;
+			const agentId = ++globalAgentNum;
 
 			const runInSandbox = () =>
 				runAgentInSandbox(
 					engine,
 					task,
-					globalAgentNum,
+					agentId,
 					getSandboxBase(workDir),
 					workDir,
 					prdSource,
@@ -408,7 +456,7 @@ export async function runParallel(
 			return runAgentInWorktree(
 				engine,
 				task,
-				globalAgentNum,
+				agentId,
 				baseBranch,
 				isolationBase,
 				workDir,
@@ -424,7 +472,7 @@ export async function runParallel(
 				engineArgs,
 			).then((res) => {
 				if (shouldFallbackToSandbox(res.error)) {
-					logWarn(`Agent ${globalAgentNum}: Worktree unavailable, retrying in sandbox mode.`);
+					logWarn(`Agent ${agentId}: Worktree unavailable, retrying in sandbox mode.`);
 					if (res.worktreeDir) {
 						cleanupAgentWorktree(res.worktreeDir, res.branchName, workDir).catch(() => {
 							// Ignore cleanup failures during fallback

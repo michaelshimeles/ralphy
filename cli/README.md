@@ -198,6 +198,18 @@ tasks:
     parallel_group: 2  # runs after group 1
 ```
 
+## Planning and test orchestration
+
+Parallel and sequential runs now use explicit task state transitions (`pending`, `running`, `completed`, `failed`, `deferred`, `skipped`) to avoid duplicate work and race conditions.
+
+Planning behavior:
+- The planner can generate structured analysis (`ANALYSIS`, `PLAN`, `FILES`, `OPTIMIZATION`) before execution.
+- Planned file lists are cached and reused when repo fingerprints match.
+
+Testing behavior:
+- Test-heavy tasks can run through an orchestrated test loop with stricter retry/defer handling.
+- Locking/state checks prevent multiple agents from claiming the same task at once.
+
 ## Branch Workflow
 
 ```bash
