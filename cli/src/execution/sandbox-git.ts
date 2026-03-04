@@ -1,28 +1,69 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { slugify } from "../git/branch.ts";
-import { logDebug } from "../ui/logger.ts";
+import { logDebug, logWarn } from "../ui/logger.ts";
+import { standardizeError } from "../utils/errors.ts";
+import { validatePath } from "./sandbox.ts";
 
 /**
- * Simple mutex to serialize git operations across sandbox agents.
+ * Simple mutex to serialize git operations and file writes across sandbox agents.
  * Prevents race conditions when multiple agents commit through shared .git.
  */
 class GitMutex {
-	private queue: Promise<void> = Promise.resolve();
+	private queue: Array<() => Promise<void>> = [];
+	private active = false;
+	private readonly GIT_MUTEX_MAX_QUEUE_SIZE = 1000;
 
 	async acquire<T>(fn: () => Promise<T>): Promise<T> {
-		let release: () => void;
-		const next = new Promise<void>((resolve) => {
-			release = resolve;
+		// Check queue size limit
+		if (this.queue.length >= this.GIT_MUTEX_MAX_QUEUE_SIZE) {
+			const error = new Error(
+				`Git mutex queue full (${this.queue.length}/${this.GIT_MUTEX_MAX_QUEUE_SIZE})`,
+			);
+			logWarn(error.message);
+			throw error;
+		}
+
+		return new Promise((resolve, reject) => {
+			const operation = async () => {
+				try {
+					const result = await fn();
+					resolve(result);
+				} catch (err) {
+					reject(err);
+				} finally {
+					this.processNext();
+				}
+			};
+
+			this.queue.push(operation);
+			this.processNext();
 		});
-		const prev = this.queue;
-		this.queue = next;
-		await prev;
-		try {
-			return await fn();
-		} finally {
-			release!();
+	}
+
+	private processNext(): void {
+		if (this.active || this.queue.length === 0) {
+			return;
+		}
+
+		this.active = true;
+		const nextOp = this.queue.shift();
+
+		if (nextOp) {
+			nextOp()
+				.catch((err) => {
+					logDebug(`Git operation failed: ${err}`);
+				})
+				.finally(() => {
+					this.active = false;
+					this.processNext();
+				});
+		} else {
+			// Queue might have more items now, check and process
+			this.active = false;
+			this.processNext();
 		}
 	}
 }
@@ -33,9 +74,7 @@ const gitMutex = new GitMutex();
  * Generate a unique identifier for branch names
  */
 function generateUniqueId(): string {
-	const timestamp = Date.now();
-	const random = Math.random().toString(36).substring(2, 8);
-	return `${timestamp}-${random}`;
+	return randomUUID();
 }
 
 /**
@@ -50,12 +89,6 @@ export interface SandboxCommitResult {
 
 /**
  * Commit changes from a sandbox to a new branch in the original repo.
- *
- * This:
- * 1. Creates a new branch from the base branch
- * 2. Copies modified files from sandbox to original
- * 3. Stages and commits the changes
- * 4. Returns to the original branch
  */
 export async function commitSandboxChanges(
 	originalDir: string,
@@ -79,6 +112,7 @@ export async function commitSandboxChanges(
 	// Serialize git operations to prevent race conditions
 	return gitMutex.acquire(async () => {
 		const git: SimpleGit = simpleGit(originalDir);
+		const copiedFiles: string[] = [];
 
 		try {
 			// Save current branch
@@ -87,10 +121,26 @@ export async function commitSandboxChanges(
 			// Create and checkout new branch from base
 			await git.checkout(["-B", branchName, baseBranch]);
 
-			// Copy modified files from sandbox to original
+			// Copy modified files from sandbox to original (protected by mutex)
 			for (const relPath of modifiedFiles) {
-				const sandboxPath = join(sandboxDir, relPath);
-				const originalPath = join(originalDir, relPath);
+				// Validate paths before copying
+				const sandboxPath = validatePath(sandboxDir, relPath);
+				const originalPath = validatePath(originalDir, relPath);
+
+				if (!sandboxPath || !originalPath) {
+					logDebug(`Security: Invalid path rejected: ${relPath}`);
+					continue;
+				}
+
+				// Additional validation: ensure file is within sandbox
+				const resolvedSandboxPath = resolve(sandboxPath);
+				const resolvedSandboxBase = resolve(sandboxDir);
+				const resolvedRelative = relative(resolvedSandboxBase, resolvedSandboxPath);
+
+				if (resolvedRelative.startsWith("..") || resolvedRelative.startsWith(`${sep}..`)) {
+					logDebug(`Security: File outside sandbox: ${relPath}`);
+					continue;
+				}
 
 				if (existsSync(sandboxPath)) {
 					const parentDir = dirname(originalPath);
@@ -101,17 +151,30 @@ export async function commitSandboxChanges(
 					// Read from sandbox and write to original
 					const content = readFileSync(sandboxPath);
 					writeFileSync(originalPath, content);
+					copiedFiles.push(relPath);
+					logDebug(`Copied back validated file: ${relPath}`);
 				}
 			}
 
+			if (copiedFiles.length === 0) {
+				logWarn(`Agent ${agentNum}: No valid files copied from sandbox for commit`);
+				await git.checkout(currentBranch);
+				return {
+					success: false,
+					branchName,
+					filesCommitted: 0,
+					error: "No valid sandbox files to commit",
+				};
+			}
+
 			// Stage all modified files
-			await git.add(modifiedFiles);
+			await git.add(copiedFiles);
 
 			// Commit
 			const commitMessage = `feat: ${taskName}\n\nAutomated commit by Ralphy agent ${agentNum}`;
 			await git.commit(commitMessage);
 
-			logDebug(`Agent ${agentNum}: Committed ${modifiedFiles.length} files to ${branchName}`);
+			logDebug(`Agent ${agentNum}: Committed ${copiedFiles.length} files to ${branchName}`);
 
 			// Return to original branch
 			await git.checkout(currentBranch);
@@ -119,14 +182,13 @@ export async function commitSandboxChanges(
 			return {
 				success: true,
 				branchName,
-				filesCommitted: modifiedFiles.length,
+				filesCommitted: copiedFiles.length,
 			};
 		} catch (error) {
-			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorMsg = standardizeError(error).message;
 
 			// Try to return to a safe state
 			try {
-				const git: SimpleGit = simpleGit(originalDir);
 				const branches = await git.branch();
 				if (branches.current !== baseBranch) {
 					await git.checkout(baseBranch);
@@ -147,32 +209,24 @@ export async function commitSandboxChanges(
 
 /**
  * Check if there are uncommitted changes in a sandbox.
- * Since sandboxes don't have proper git, we check if any files
- * were modified compared to original.
  */
 export async function hasSandboxChanges(
-	sandboxDir: string,
-	originalDir: string,
+	_sandboxDir: string,
+	_originalDir: string,
 	modifiedFiles: string[],
 ): Promise<boolean> {
 	return modifiedFiles.length > 0;
 }
 
 /**
- * Initialize git configuration in sandbox (if needed).
- * This is mainly for agents that require git to be present.
+ * Initialize git configuration in sandbox.
  */
 export async function initSandboxGit(sandboxDir: string, originalDir: string): Promise<void> {
-	// The .git directory should already be symlinked from createSandbox
-	// This function is here for any additional git setup needed
-
 	const gitDir = join(sandboxDir, ".git");
 	if (!existsSync(gitDir)) {
-		// If .git wasn't symlinked, create a minimal git init
 		const git: SimpleGit = simpleGit(sandboxDir);
 		await git.init();
 
-		// Copy user config from original if available
 		const originalGit: SimpleGit = simpleGit(originalDir);
 		try {
 			const userName = await originalGit.getConfig("user.name");

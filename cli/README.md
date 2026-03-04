@@ -278,6 +278,9 @@ ralphy --parallel --sandbox
 - Retryable rate-limit or quota errors are detected and deferred for later retry
 - Local changes are stashed before the merge phase and restored after
 - Agents should not modify PRD files, `.ralphy/progress.txt`, `.ralphy-worktrees`, or `.ralphy-sandboxes`
+- Parallel batches can be conflict-aware (file-overlap graph coloring) to reduce merge collisions
+- Worktree cleanup is tracked and recovered across crashes; stale worktrees are cleaned on next run
+- Merge phase uses a global lock to avoid concurrent merge corruption from multiple ralphy processes
 
 ## Options
 

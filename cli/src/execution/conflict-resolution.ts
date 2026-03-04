@@ -1,6 +1,7 @@
 import type { AIEngine } from "../engines/types.ts";
 import { completeMerge, getConflictedFiles } from "../git/merge.ts";
 import { logDebug, logError, logInfo } from "../ui/logger.ts";
+import { standardizeError } from "../utils/errors.ts";
 
 /**
  * Build a prompt for AI-assisted conflict resolution
@@ -78,7 +79,7 @@ export async function resolveConflictsWithAI(
 		logError(`AI conflict resolution failed: ${result.error || "Unknown error"}`);
 		return false;
 	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
+		const errorMsg = standardizeError(error).message;
 		logError(`AI conflict resolution error: ${errorMsg}`);
 		return false;
 	}

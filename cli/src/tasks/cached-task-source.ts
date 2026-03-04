@@ -1,5 +1,4 @@
 import { logError } from "../ui/logger.ts";
-import { JsonTaskSource } from "./json.ts";
 import type { Task, TaskSource, TaskSourceType } from "./types.ts";
 import { YamlTaskSource } from "./yaml.ts";
 
@@ -56,20 +55,6 @@ export class CachedTaskSource implements TaskSource {
 		return this.inner instanceof YamlTaskSource;
 	}
 
-	/**
-	 * Check if the inner source is a JsonTaskSource
-	 */
-	isJsonSource(): boolean {
-		return this.inner instanceof JsonTaskSource;
-	}
-
-	/**
-	 * Check if the inner source supports parallel groups (YAML or JSON)
-	 */
-	supportsParallelGroups(): boolean {
-		return this.inner instanceof YamlTaskSource || this.inner instanceof JsonTaskSource;
-	}
-
 	async getAllTasks(): Promise<Task[]> {
 		if (!this.cachedTasks) {
 			this.cachedTasks = await this.inner.getAllTasks();
@@ -111,16 +96,13 @@ export class CachedTaskSource implements TaskSource {
 	}
 
 	/**
-	 * Get the parallel group of a task (YAML or JSON sources)
+	 * Get the parallel group of a task (YamlTaskSource only)
 	 */
 	async getParallelGroup(title: string): Promise<number> {
-		if (this.inner instanceof YamlTaskSource) {
-			return this.inner.getParallelGroup(title);
+		if (!(this.inner instanceof YamlTaskSource)) {
+			return 0;
 		}
-		if (this.inner instanceof JsonTaskSource) {
-			return this.inner.getParallelGroup(title);
-		}
-		return 0;
+		return this.inner.getParallelGroup(title);
 	}
 
 	/**
@@ -212,9 +194,7 @@ export class CachedTaskSource implements TaskSource {
 						);
 						this.scheduleFlush(); // Retry on failure
 					} else {
-						logError(
-							`CachedTaskSource: Failed to flush after ${CachedTaskSource.MAX_FLUSH_RETRIES} retries: ${err}`,
-						);
+						logError(`CachedTaskSource: Failed to flush after ${CachedTaskSource.MAX_FLUSH_RETRIES} retries: ${err}`);
 						this.flushRetryCount = 0;
 					}
 				});

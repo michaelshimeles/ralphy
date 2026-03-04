@@ -76,3 +76,31 @@ export function clearDeferredTask(
 		writeState(workDir, state);
 	}
 }
+
+/**
+ * Get the current deferral count for a task
+ */
+export function getDeferredCount(
+	type: TaskSourceType,
+	task: Task,
+	workDir: string,
+	prdFile?: string,
+): number {
+	const state = readState(workDir);
+	const key = buildKey(type, task, prdFile);
+	return state.tasks[key]?.count ?? 0;
+}
+
+/**
+ * Check if a task has exceeded the maximum number of deferrals
+ */
+export function hasExceededMaxDeferrals(
+	type: TaskSourceType,
+	task: Task,
+	workDir: string,
+	maxRetries: number,
+	prdFile?: string,
+): boolean {
+	const count = getDeferredCount(type, task, workDir, prdFile);
+	return count >= maxRetries;
+}
