@@ -66,6 +66,10 @@ boundaries:
 
 Rules apply to all tasks (single or PRD).
 
+Config safety behavior:
+- Invalid config files fall back to defaults with a warning.
+- Unsafe prototype-pollution keys are rejected during config parsing.
+
 ## AI Engines
 
 ```bash

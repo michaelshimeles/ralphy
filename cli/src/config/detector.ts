@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { logDebug } from "../ui/logger.ts";
 
 interface DetectedProject {
 	name: string;
@@ -106,8 +107,9 @@ function detectNodeProject(packageJsonPath: string, result: DetectedProject): vo
 		if (scripts.build) {
 			result.buildCmd = "npm run build";
 		}
-	} catch {
-		// Ignore parsing errors
+	} catch (error) {
+		// BUG FIX: Log parsing errors instead of silently ignoring
+		logDebug(`Failed to parse package.json: ${error}`);
 	}
 }
 

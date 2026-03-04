@@ -28,7 +28,7 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 
 	if (!available) {
 		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
+		throw new Error(`${engine.name} CLI not available`);
 	}
 
 	logInfo(`Running task with ${engine.name}...`);
@@ -129,7 +129,7 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 				tasksFailed: 1,
 			});
 			notifyTaskFailed(task, result.error || "Unknown error");
-			process.exit(1);
+			throw new Error(result.error || "Unknown error");
 		}
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
@@ -140,6 +140,6 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 			tasksFailed: 1,
 		});
 		notifyTaskFailed(task, errorMsg);
-		process.exit(1);
+		throw error instanceof Error ? error : new Error(errorMsg);
 	}
 }

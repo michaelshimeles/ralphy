@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { sanitizeSecrets } from "../utils/sanitization.ts";
 import type {
 	Session,
 	SessionFull,
@@ -17,6 +18,26 @@ import type {
 
 // Package version (loaded lazily)
 let cachedVersion: string | undefined;
+
+function sanitizeTelemetryValue(value: unknown): unknown {
+	if (typeof value === "string") {
+		return sanitizeSecrets(value);
+	}
+
+	if (Array.isArray(value)) {
+		return value.map((item) => sanitizeTelemetryValue(item));
+	}
+
+	if (value && typeof value === "object") {
+		const sanitized: Record<string, unknown> = {};
+		for (const [key, nested] of Object.entries(value)) {
+			sanitized[key] = sanitizeTelemetryValue(nested);
+		}
+		return sanitized;
+	}
+
+	return value;
+}
 
 function getCliVersion(): string {
 	if (cachedVersion) return cachedVersion;
@@ -116,8 +137,8 @@ export class TelemetryCollector {
 
 		// Store prompts/responses for full mode
 		if (this.level === "full") {
-			if (prompt) this.prompts.push(prompt);
-			if (response) this.responses.push(response);
+			if (prompt) this.prompts.push(sanitizeSecrets(prompt));
+			if (response) this.responses.push(sanitizeSecrets(response));
 		}
 	}
 
@@ -131,7 +152,10 @@ export class TelemetryCollector {
 			startTime: Date.now(),
 			toolName,
 			parameterKeys: parameters ? Object.keys(parameters) : undefined,
-			parameters: this.level === "full" ? parameters : undefined,
+			parameters:
+				this.level === "full"
+					? (sanitizeTelemetryValue(parameters) as Record<string, unknown> | undefined)
+					: undefined,
 		};
 
 		// Track file paths in full mode
@@ -164,7 +188,7 @@ export class TelemetryCollector {
 		// Add full mode data
 		if (this.level === "full") {
 			toolCall.parameters = this.activeToolCall.parameters;
-			if (result) toolCall.result = result;
+			if (result) toolCall.result = sanitizeSecrets(result);
 		}
 
 		this.toolCalls.push(toolCall);
@@ -199,8 +223,10 @@ export class TelemetryCollector {
 		};
 
 		if (this.level === "full") {
-			toolCall.parameters = options?.parameters;
-			toolCall.result = options?.result;
+			toolCall.parameters = sanitizeTelemetryValue(options?.parameters) as
+				| Record<string, unknown>
+				| undefined;
+			toolCall.result = options?.result ? sanitizeSecrets(options.result) : undefined;
 
 			// Track file paths
 			if (options?.parameters) {
@@ -303,7 +329,7 @@ export class TelemetryCollector {
 				fullSession.response = this.responses.join("\n\n---\n\n");
 			}
 			if (this.filePaths.size > 0) {
-				fullSession.filePaths = Array.from(this.filePaths);
+				fullSession.filePaths = Array.from(this.filePaths).map((path) => sanitizeSecrets(path));
 			}
 			return { session: fullSession, toolCalls: this.toolCalls };
 		}
