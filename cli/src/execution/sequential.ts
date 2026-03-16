@@ -26,7 +26,7 @@ export interface ExecutionOptions {
 	createPr: boolean;
 	draftPr: boolean;
 	autoCommit: boolean;
-	browserEnabled: "auto" | "true" | "false";
+	browserEnabled: "true" | "false";
 	prdFile?: string;
 	/** Active settings to display in spinner */
 	activeSettings?: string[];

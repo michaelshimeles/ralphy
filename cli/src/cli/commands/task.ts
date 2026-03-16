@@ -1,44 +1,44 @@
-import { loadConfig } from "../../config/loader.ts";
 import type { RuntimeOptions } from "../../config/types.ts";
 import { logTaskProgress } from "../../config/writer.ts";
 import { createEngine, isEngineAvailable } from "../../engines/index.ts";
 import type { AIEngineName } from "../../engines/types.ts";
 import { isBrowserAvailable } from "../../execution/browser.ts";
 import { buildPrompt } from "../../execution/prompt.ts";
-import { isRetryableError, withRetry } from "../../execution/retry.ts";
-import { sendNotifications } from "../../notifications/webhook.ts";
+import { isFatalError, isRetryableError, withRetry } from "../../execution/retry.ts";
 import { formatTokens, logError, logInfo, setVerbose } from "../../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
 import { ProgressSpinner } from "../../ui/spinner.ts";
 
+export interface TaskRunResult {
+	success: boolean;
+	fatal: boolean;
+	error?: string;
+}
+
 /**
  * Run a single task (brownfield mode)
  */
-export async function runTask(task: string, options: RuntimeOptions): Promise<void> {
+export async function runTask(task: string, options: RuntimeOptions): Promise<TaskRunResult> {
 	const workDir = process.cwd();
-	const config = loadConfig(workDir);
-
-	// Set verbose mode
 	setVerbose(options.verbose);
 
-	// Check engine availability
 	const engine = createEngine(options.aiEngine as AIEngineName);
 	const available = await isEngineAvailable(options.aiEngine as AIEngineName);
 
 	if (!available) {
-		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
+		const error = `${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`;
+		logError(error);
+		logTaskProgress(task, "failed", workDir);
+		return { success: false, fatal: true, error };
 	}
 
 	logInfo(`Running task with ${engine.name}...`);
 
-	// Check browser availability
 	if (isBrowserAvailable(options.browserEnabled)) {
 		logInfo("Browser automation enabled (agent-browser)");
 	}
 
-	// Build prompt
 	const prompt = buildPrompt({
 		task,
 		autoCommit: options.autoCommit,
@@ -48,17 +48,26 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 		skipLint: options.skipLint,
 	});
 
-	// Build active settings for display
 	const activeSettings = buildActiveSettings(options);
-
-	// Execute with spinner
 	const spinner = new ProgressSpinner(task, activeSettings);
 
 	if (options.dryRun) {
 		spinner.success("(dry run) Would execute task");
 		console.log("\nPrompt:");
 		console.log(prompt);
-		return;
+		return { success: true, fatal: false };
+	}
+
+	const notifySingleTask = options.repeatCount === 1;
+
+	function failWith(errorMsg: string): TaskRunResult {
+		const fatal = isFatalError(errorMsg);
+		spinner.error(errorMsg);
+		logTaskProgress(task, "failed", workDir);
+		if (notifySingleTask) {
+			notifyTaskFailed(task, errorMsg);
+		}
+		return { success: false, fatal, error: errorMsg };
 	}
 
 	try {
@@ -66,21 +75,17 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 			async () => {
 				spinner.updateStep("Working");
 
-				// Build engine options
 				const engineOptions = {
 					...(options.modelOverride && { modelOverride: options.modelOverride }),
 					...(options.engineArgs &&
 						options.engineArgs.length > 0 && { engineArgs: options.engineArgs }),
 				};
 
-				// Use streaming if available
 				if (engine.executeStreaming) {
 					return await engine.executeStreaming(
 						prompt,
 						workDir,
-						(step) => {
-							spinner.updateStep(step);
-						},
+						(step) => spinner.updateStep(step),
 						engineOptions,
 					);
 				}
@@ -96,24 +101,18 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 			{
 				maxRetries: options.maxRetries,
 				retryDelay: options.retryDelay,
-				onRetry: (attempt) => {
-					spinner.updateStep(`Retry ${attempt}`);
-				},
+				onRetry: (attempt) => spinner.updateStep(`Retry ${attempt}`),
 			},
 		);
 
 		if (result.success) {
 			const tokens = formatTokens(result.inputTokens, result.outputTokens);
 			spinner.success(`Done ${tokens}`);
-
 			logTaskProgress(task, "completed", workDir);
-			await sendNotifications(config, "completed", {
-				tasksCompleted: 1,
-				tasksFailed: 0,
-			});
-			notifyTaskComplete(task);
+			if (notifySingleTask) {
+				notifyTaskComplete(task);
+			}
 
-			// Show response summary
 			if (result.response && result.response !== "Task completed") {
 				console.log("\nResult:");
 				console.log(result.response.slice(0, 500));
@@ -121,25 +120,11 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 					console.log("...");
 				}
 			}
-		} else {
-			spinner.error(result.error || "Unknown error");
-			logTaskProgress(task, "failed", workDir);
-			await sendNotifications(config, "failed", {
-				tasksCompleted: 0,
-				tasksFailed: 1,
-			});
-			notifyTaskFailed(task, result.error || "Unknown error");
-			process.exit(1);
+			return { success: true, fatal: false };
 		}
+
+		return failWith(result.error || "Unknown error");
 	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		spinner.error(errorMsg);
-		logTaskProgress(task, "failed", workDir);
-		await sendNotifications(config, "failed", {
-			tasksCompleted: 0,
-			tasksFailed: 1,
-		});
-		notifyTaskFailed(task, errorMsg);
-		process.exit(1);
+		return failWith(error instanceof Error ? error.message : String(error));
 	}
 }

@@ -2,7 +2,7 @@
 
 # ============================================
 # Ralphy - Autonomous AI Coding Loop
-# Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code and Factory Droid
+# Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, Factory Droid, GitHub Copilot, and Gemini CLI
 # Runs until PRD is complete
 # ============================================
 
@@ -12,7 +12,7 @@ set -euo pipefail
 # CONFIGURATION & DEFAULTS
 # ============================================
 
-VERSION="4.3.0"
+VERSION="4.7.2"
 
 # Ralphy config directory
 RALPHY_DIR=".ralphy"
@@ -27,12 +27,15 @@ AUTO_COMMIT=true
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, or copilot
+AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, copilot, or gemini
 MODEL_OVERRIDE=""   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
 MAX_RETRIES=3
 RETRY_DELAY=5
+REPEAT_COUNT=1
+CONTINUE_ON_FAILURE=false
+REPEAT_FLAG_USED=false
 VERBOSE=false
 
 # Git branch options
@@ -44,16 +47,19 @@ PR_DRAFT=false
 # Parallel execution
 PARALLEL=false
 MAX_PARALLEL=3
+NO_MERGE=false
 
 # PRD source options
-PRD_SOURCE="markdown"  # markdown, yaml, github
+PRD_SOURCE="markdown"  # markdown, yaml, json, github
 PRD_FILE="PRD.md"
 GITHUB_REPO=""
 GITHUB_LABEL=""
 SYNC_ISSUE=""  # GitHub issue number to sync PRD with
+TASK_SOURCE_FLAG_USED=false
 
 # Browser automation (agent-browser)
-BROWSER_ENABLED="auto"  # auto, true, false
+BROWSER_ENABLED="false"  # true, false; pass --browser to enable
+BROWSER_FLAG_USED=false
 
 # Colors (detect if terminal supports colors)
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
@@ -75,6 +81,7 @@ ai_pid=""
 monitor_pid=""
 tmpfile=""
 CODEX_LAST_MESSAGE_FILE=""
+LAST_TASK_FATAL=false
 current_step="Thinking"
 total_input_tokens=0
 total_output_tokens=0
@@ -115,6 +122,18 @@ log_debug() {
   fi
 }
 
+is_positive_integer() {
+  local value="$1"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]]
+}
+
+is_fatal_error_output() {
+  local file="$1"
+  # Only check the last 20 lines to avoid false positives from AI-generated narrative
+  tail -20 "$file" | grep -Eqi \
+    'not authenticated|no authentication|authentication failed|invalid[^[:space:]]*token|invalid[^[:space:]]*api.?key|unauthorized|(^|[^0-9])401([^0-9]|$)|(^|[^0-9])403([^0-9]|$)|command not found|not installed|is not recognized'
+}
+
 # Slugify text for branch names
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-|-$//g' | cut -c1-50
@@ -133,8 +152,8 @@ is_browser_available() {
     fi
     return 0
   fi
-  # auto mode: check if available
-  command -v agent-browser &>/dev/null
+  # Any other value (including legacy "auto"): treat as disabled
+  return 1
 }
 
 # Get browser instructions for prompt injection
@@ -330,8 +349,8 @@ boundaries:
 # Capabilities - optional tool integrations
 capabilities:
   # Browser automation via agent-browser (https://agent-browser.dev)
-  # Values: "auto" (detect), "true" (force enable), "false" (disable)
-  browser: "auto"
+  # Values: "true" (enable), "false" (disable)
+  browser: "false"
 EOF
 
   # Create progress.txt
@@ -370,14 +389,14 @@ load_ralphy_boundaries() {
 
 # Load browser setting from config.yaml
 load_browser_setting() {
-  [[ ! -f "$CONFIG_FILE" ]] && echo "auto" && return
+  [[ ! -f "$CONFIG_FILE" ]] && echo "false" && return
 
   if command -v yq &>/dev/null; then
     local setting
-    setting=$(yq -r '.capabilities.browser // "auto"' "$CONFIG_FILE" 2>/dev/null || echo "auto")
+    setting=$(yq -r '.capabilities.browser // "false"' "$CONFIG_FILE" 2>/dev/null || echo "false")
     echo "$setting"
   else
-    echo "auto"
+    echo "false"
   fi
 }
 
@@ -599,6 +618,7 @@ Keep changes focused and minimal. Do not refactor unrelated code."
 # Run a single brownfield task
 run_brownfield_task() {
   local task="$1"
+  LAST_TASK_FATAL=false
 
   echo ""
   echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -609,6 +629,12 @@ run_brownfield_task() {
   local prompt
   prompt=$(build_brownfield_prompt "$task")
 
+  if [[ "$DRY_RUN" == true ]]; then
+    log_info "DRY RUN - Would execute:"
+    echo "${DIM}$prompt${RESET}"
+    return 0
+  fi
+
   # Create temp file for output
   local output_file
   output_file=$(mktemp)
@@ -618,44 +644,60 @@ run_brownfield_task() {
     log_info "Browser automation enabled (agent-browser)"
   fi
 
-  # Run the AI engine (tee to show output while saving for parsing)
-  case "$AI_ENGINE" in
-    claude)
-      claude --dangerously-skip-permissions \
-        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
-        -p "$prompt" 2>&1 | tee "$output_file"
-      ;;
-    opencode)
-      opencode --output-format stream-json \
-        --approval-mode full-auto \
-        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
-        "$prompt" 2>&1 | tee "$output_file"
-      ;;
-    cursor)
-      agent --dangerously-skip-permissions \
-        -p "$prompt" 2>&1 | tee "$output_file"
-      ;;
-    qwen)
-      qwen --output-format stream-json \
-        --approval-mode yolo \
-        -p "$prompt" 2>&1 | tee "$output_file"
-      ;;
-    droid)
-      droid exec --output-format stream-json \
-        --auto medium \
-        "$prompt" 2>&1 | tee "$output_file"
-      ;;
-    copilot)
-      copilot -p "$prompt" \
-        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
-        2>&1 | tee "$output_file"
-      ;;
-    codex)
-      codex exec --full-auto \
-        --json \
-        "$prompt" 2>&1 | tee "$output_file"
-      ;;
-  esac
+  # Run the AI engine
+  run_engine() {
+    case "$AI_ENGINE" in
+      claude)
+        claude --dangerously-skip-permissions \
+          ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+          -p "$prompt" 2>&1
+        ;;
+      opencode)
+        opencode --output-format stream-json \
+          --approval-mode full-auto \
+          ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+          "$prompt" 2>&1
+        ;;
+      cursor)
+        agent --dangerously-skip-permissions \
+          -p "$prompt" 2>&1
+        ;;
+      qwen)
+        qwen --output-format stream-json \
+          --approval-mode yolo \
+          -p "$prompt" 2>&1
+        ;;
+      droid)
+        droid exec --output-format stream-json \
+          --auto medium \
+          "$prompt" 2>&1
+        ;;
+      copilot)
+        copilot -p "$prompt" \
+          ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+          2>&1
+        ;;
+      gemini)
+        gemini --output-format stream-json \
+          --yolo \
+          ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+          -p "$prompt" 2>&1
+        ;;
+      codex)
+        codex exec --dangerously-bypass-approvals-and-sandbox \
+          --json \
+          ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+          "$prompt" 2>&1
+        ;;
+    esac
+  }
+
+  # In repeat mode, suppress streaming output to avoid a wall of text
+  if [[ "$REPEAT_COUNT" -gt 1 ]]; then
+    run_engine > "$output_file"
+  else
+    run_engine | tee "$output_file"
+  fi
 
   local exit_code=$?
 
@@ -664,6 +706,10 @@ run_brownfield_task() {
     log_task_history "$task" "completed"
     log_success "Task completed"
   else
+    if is_fatal_error_output "$output_file"; then
+      LAST_TASK_FATAL=true
+      log_error "Fatal error detected (auth/config/CLI)."
+    fi
     log_task_history "$task" "failed"
     log_error "Task failed"
   fi
@@ -692,6 +738,9 @@ ${BOLD}CONFIG & SETUP:${RESET}
 
 ${BOLD}SINGLE TASK MODE:${RESET}
   "task description"  Run a single task without PRD (quotes required)
+  --repeat N          Repeat single task N times
+  --continue-on-failure
+                      Continue repeat loop on failure (non-fatal only)
   --no-commit         Don't auto-commit after task completion
 
 ${BOLD}AI ENGINE OPTIONS:${RESET}
@@ -702,6 +751,7 @@ ${BOLD}AI ENGINE OPTIONS:${RESET}
   --qwen              Use Qwen-Code
   --droid             Use Factory Droid
   --copilot           Use GitHub Copilot
+  --gemini            Use Gemini CLI
   --model <name>      Override default model for any engine
                       Claude: sonnet, haiku, opus
                       OpenCode: gpt-4o, gpt-4o-mini, o1, o3-mini
@@ -721,6 +771,7 @@ ${BOLD}EXECUTION OPTIONS:${RESET}
 ${BOLD}PARALLEL EXECUTION:${RESET}
   --parallel          Run independent tasks in parallel
   --max-parallel N    Max concurrent tasks (default: 3)
+  --no-merge          Keep parallel branches without auto-merge
 
 ${BOLD}GIT BRANCH OPTIONS:${RESET}
   --branch-per-task   Create a new git branch for each task
@@ -731,6 +782,7 @@ ${BOLD}GIT BRANCH OPTIONS:${RESET}
 ${BOLD}PRD SOURCE OPTIONS:${RESET}
   --prd FILE          PRD file path (default: PRD.md)
   --yaml FILE         Use YAML task file instead of markdown
+  --json FILE         Use JSON task file
   --github REPO       Fetch tasks from GitHub issues (e.g., owner/repo)
   --github-label TAG  Filter GitHub issues by label
   --sync-issue NUM    Sync PRD file to GitHub issue body on each iteration
@@ -748,6 +800,8 @@ ${BOLD}EXAMPLES:${RESET}
   # Brownfield mode (single tasks in existing projects)
   ./ralphy.sh --init                       # Initialize config
   ./ralphy.sh "add dark mode toggle"       # Run single task
+  ./ralphy.sh --repeat 3 "find and fix bugs"
+  ./ralphy.sh --repeat 5 --continue-on-failure "harden edge cases"
   ./ralphy.sh "fix the login bug" --cursor # Single task with Cursor
   ./ralphy.sh "test the login flow" --browser  # Task with browser automation
 
@@ -757,6 +811,7 @@ ${BOLD}EXAMPLES:${RESET}
   ./ralphy.sh --branch-per-task --create-pr  # Feature branch workflow
   ./ralphy.sh --parallel --max-parallel 4  # Run 4 tasks concurrently
   ./ralphy.sh --yaml tasks.yaml            # Use YAML task file
+  ./ralphy.sh --json tasks.json            # Use JSON task file
   ./ralphy.sh --github owner/repo          # Fetch from GitHub issues
 
 ${BOLD}PRD FORMATS:${RESET}
@@ -768,6 +823,9 @@ ${BOLD}PRD FORMATS:${RESET}
       - title: Task description
         completed: false
         parallel_group: 1  # Optional: tasks with same group run in parallel
+
+  JSON (tasks.json):
+    { "tasks": [{ "title": "Task description", "completed": false, "parallel_group": 1 }] }
 
   GitHub Issues:
     Uses open issues from the specified repository
@@ -832,12 +890,30 @@ parse_args() {
         AI_ENGINE="copilot"
         shift
         ;;
+      --gemini)
+        AI_ENGINE="gemini"
+        shift
+        ;;
       --model)
         MODEL_OVERRIDE="$2"
         shift 2
         ;;
       --dry-run)
         DRY_RUN=true
+        shift
+        ;;
+      --repeat)
+        [[ -z "${2:-}" ]] && { log_error "--repeat requires a value"; exit 1; }
+        if ! is_positive_integer "$2" || [[ "$2" -gt 10000 ]]; then
+          log_error "--repeat must be an integer between 1 and 10000"
+          exit 1
+        fi
+        REPEAT_COUNT="$2"
+        REPEAT_FLAG_USED=true
+        shift 2
+        ;;
+      --continue-on-failure)
+        CONTINUE_ON_FAILURE=true
         shift
         ;;
       --max-iterations)
@@ -860,6 +936,10 @@ parse_args() {
         MAX_PARALLEL="${2:-3}"
         shift 2
         ;;
+      --no-merge)
+        NO_MERGE=true
+        shift
+        ;;
       --branch-per-task)
         BRANCH_PER_TASK=true
         shift
@@ -879,16 +959,25 @@ parse_args() {
       --prd)
         PRD_FILE="${2:-PRD.md}"
         PRD_SOURCE="markdown"
+        TASK_SOURCE_FLAG_USED=true
         shift 2
         ;;
       --yaml)
         PRD_FILE="${2:-tasks.yaml}"
         PRD_SOURCE="yaml"
+        TASK_SOURCE_FLAG_USED=true
+        shift 2
+        ;;
+      --json)
+        PRD_FILE="${2:-tasks.json}"
+        PRD_SOURCE="json"
+        TASK_SOURCE_FLAG_USED=true
         shift 2
         ;;
       --github)
         GITHUB_REPO="${2:-}"
         PRD_SOURCE="github"
+        TASK_SOURCE_FLAG_USED=true
         shift 2
         ;;
       --github-label)
@@ -930,10 +1019,12 @@ parse_args() {
         ;;
       --browser)
         BROWSER_ENABLED="true"
+        BROWSER_FLAG_USED=true
         shift
         ;;
       --no-browser)
         BROWSER_ENABLED="false"
+        BROWSER_FLAG_USED=true
         shift
         ;;
       -*)
@@ -980,6 +1071,22 @@ check_requirements() {
       fi
       if ! command -v yq &>/dev/null; then
         log_error "yq is required for YAML parsing. Install from https://github.com/mikefarah/yq"
+        exit 1
+      fi
+      ;;
+    json)
+      if ! command -v jq &>/dev/null; then
+        log_error "jq is required for JSON parsing. Install from https://github.com/jqlang/jq"
+        exit 1
+      fi
+      if [[ ! -f "$PRD_FILE" ]]; then
+        log_error "$PRD_FILE not found in current directory"
+        log_info "Create a tasks.json file with a top-level tasks array"
+        log_info "Or use: --prd PRD.md for Markdown task files"
+        exit 1
+      fi
+      if ! jq -e '.tasks and (.tasks | type == "array")' "$PRD_FILE" >/dev/null 2>&1; then
+        log_error "Invalid JSON task file: top-level 'tasks' array is required"
         exit 1
       fi
       ;;
@@ -1037,11 +1144,17 @@ check_requirements() {
         exit 1
       fi
       ;;
+    gemini)
+      if ! command -v gemini &>/dev/null; then
+        log_error "Gemini CLI not found. Install from https://github.com/google-gemini/gemini-cli"
+        exit 1
+      fi
+      ;;
     *)
       if ! command -v claude &>/dev/null; then
         log_error "Claude Code CLI not found."
         log_info "Install from: https://github.com/anthropics/claude-code"
-        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen, --copilot"
+        log_info "Or use another engine: --cursor, --opencode, --codex, --qwen, --droid, --copilot, --gemini"
         exit 1
       fi
       ;;
@@ -1235,6 +1348,45 @@ get_tasks_in_group_yaml() {
 }
 
 # ============================================
+# TASK SOURCES - JSON
+# ============================================
+
+get_tasks_json() {
+  jq -r '.tasks[] | select(.completed != true) | .title' "$PRD_FILE" 2>/dev/null || true
+}
+
+get_next_task_json() {
+  jq -r '.tasks[] | select(.completed != true) | .title' "$PRD_FILE" 2>/dev/null | head -1 | cut -c1-50 || echo ""
+}
+
+count_remaining_json() {
+  jq -r '[.tasks[] | select(.completed != true)] | length' "$PRD_FILE" 2>/dev/null || echo "0"
+}
+
+count_completed_json() {
+  jq -r '[.tasks[] | select(.completed == true)] | length' "$PRD_FILE" 2>/dev/null || echo "0"
+}
+
+mark_task_complete_json() {
+  local task=$1
+  local tmp_file
+  tmp_file=$(mktemp)
+  if jq --arg task "$task" \
+    '(.tasks[] | select(.title == $task) | .completed) = true' \
+    "$PRD_FILE" > "$tmp_file" 2>/dev/null; then
+    mv "$tmp_file" "$PRD_FILE"
+  else
+    rm -f "$tmp_file"
+    return 1
+  fi
+}
+
+get_tasks_in_group_json() {
+  local group=$1
+  jq -r ".tasks[] | select(.completed != true and (.parallel_group // 0) == $group) | .title" "$PRD_FILE" 2>/dev/null || true
+}
+
+# ============================================
 # TASK SOURCES - GITHUB ISSUES
 # ============================================
 
@@ -1291,6 +1443,7 @@ get_next_task() {
   case "$PRD_SOURCE" in
     markdown) get_next_task_markdown ;;
     yaml) get_next_task_yaml ;;
+    json) get_next_task_json ;;
     github) get_next_task_github ;;
   esac
 }
@@ -1299,6 +1452,7 @@ get_all_tasks() {
   case "$PRD_SOURCE" in
     markdown) get_tasks_markdown ;;
     yaml) get_tasks_yaml ;;
+    json) get_tasks_json ;;
     github) get_tasks_github ;;
   esac
 }
@@ -1307,6 +1461,7 @@ count_remaining_tasks() {
   case "$PRD_SOURCE" in
     markdown) count_remaining_markdown ;;
     yaml) count_remaining_yaml ;;
+    json) count_remaining_json ;;
     github) count_remaining_github ;;
   esac
 }
@@ -1315,6 +1470,7 @@ count_completed_tasks() {
   case "$PRD_SOURCE" in
     markdown) count_completed_markdown ;;
     yaml) count_completed_yaml ;;
+    json) count_completed_json ;;
     github) count_completed_github ;;
   esac
 }
@@ -1324,6 +1480,7 @@ mark_task_complete() {
   case "$PRD_SOURCE" in
     markdown) mark_task_complete_markdown "$task" ;;
     yaml) mark_task_complete_yaml "$task" ;;
+    json) mark_task_complete_json "$task" ;;
     github) mark_task_complete_github "$task" ;;
   esac
 }
@@ -1598,6 +1755,9 @@ $never_touch
     yaml)
       prompt="@${PRD_FILE} @$PROGRESS_FILE"
       ;;
+    json)
+      prompt="@${PRD_FILE} @$PROGRESS_FILE"
+      ;;
     github)
       # For GitHub issues, we include the issue body
       local issue_body=""
@@ -1638,6 +1798,10 @@ $step. Run linting and ensure it passes before proceeding."
 $step. Update the PRD to mark the task as complete (change '- [ ]' to '- [x]')."
       ;;
     yaml)
+      prompt="$prompt
+$step. Update ${PRD_FILE} to mark the task as completed (set completed: true)."
+      ;;
+    json)
       prompt="$prompt
 $step. Update ${PRD_FILE} to mark the task as completed (set completed: true)."
       ;;
@@ -1707,11 +1871,19 @@ run_ai_command() {
         ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
         > "$output_file" 2>&1 &
       ;;
+    gemini)
+      # Gemini CLI: stream-json output with yolo approval mode
+      gemini --output-format stream-json \
+        --yolo \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        -p "$prompt" > "$output_file" 2>&1 &
+      ;;
     codex)
       CODEX_LAST_MESSAGE_FILE="${output_file}.last"
       rm -f "$CODEX_LAST_MESSAGE_FILE"
-      codex exec --full-auto \
+      codex exec --dangerously-bypass-approvals-and-sandbox \
         --json \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
         --output-last-message "$CODEX_LAST_MESSAGE_FILE" \
         "$prompt" > "$output_file" 2>&1 &
       ;;
@@ -2279,13 +2451,23 @@ Focus only on implementing: $task_name"
             ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"}
         ) > "$tmpfile" 2>>"$log_file"
         ;;
+      gemini)
+        (
+          cd "$worktree_dir"
+          gemini --output-format stream-json \
+            --yolo \
+            ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+            -p "$prompt"
+        ) > "$tmpfile" 2>>"$log_file"
+        ;;
       codex)
         (
           cd "$worktree_dir"
           CODEX_LAST_MESSAGE_FILE="$tmpfile.last"
           rm -f "$CODEX_LAST_MESSAGE_FILE"
-          codex exec --full-auto \
+          codex exec --dangerously-bypass-approvals-and-sandbox \
             --json \
+            ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
             --output-last-message "$CODEX_LAST_MESSAGE_FILE" \
             "$prompt"
         ) > "$tmpfile" 2>>"$log_file"
@@ -2424,11 +2606,17 @@ run_parallel_tasks() {
   local completed_branches=()
   local groups=("all")
 
-  if [[ "$PRD_SOURCE" == "yaml" ]]; then
+  if [[ "$PRD_SOURCE" == "yaml" || "$PRD_SOURCE" == "json" ]]; then
     groups=()
-    while IFS= read -r group; do
-      [[ -n "$group" ]] && groups+=("$group")
-    done < <(yq -r '.tasks[] | select(.completed != true) | (.parallel_group // 0)' "$PRD_FILE" 2>/dev/null | sort -n | uniq)
+    if [[ "$PRD_SOURCE" == "yaml" ]]; then
+      while IFS= read -r group; do
+        [[ -n "$group" ]] && groups+=("$group")
+      done < <(yq -r '.tasks[] | select(.completed != true) | (.parallel_group // 0)' "$PRD_FILE" 2>/dev/null | sort -n | uniq)
+    else
+      while IFS= read -r group; do
+        [[ -n "$group" ]] && groups+=("$group")
+      done < <(jq -r '.tasks[] | select(.completed != true) | (.parallel_group // 0)' "$PRD_FILE" 2>/dev/null | sort -n | uniq)
+    fi
   fi
 
   for group in "${groups[@]}"; do
@@ -2436,10 +2624,16 @@ run_parallel_tasks() {
     local group_label=""
     local group_completed_branches=()  # Track branches completed in this group
 
-    if [[ "$PRD_SOURCE" == "yaml" ]]; then
-      while IFS= read -r task; do
-        [[ -n "$task" ]] && tasks+=("$task")
-      done < <(get_tasks_in_group_yaml "$group")
+    if [[ "$PRD_SOURCE" == "yaml" || "$PRD_SOURCE" == "json" ]]; then
+      if [[ "$PRD_SOURCE" == "yaml" ]]; then
+        while IFS= read -r task; do
+          [[ -n "$task" ]] && tasks+=("$task")
+        done < <(get_tasks_in_group_yaml "$group")
+      else
+        while IFS= read -r task; do
+          [[ -n "$task" ]] && tasks+=("$task")
+        done < <(get_tasks_in_group_json "$group")
+      fi
       [[ ${#tasks[@]} -eq 0 ]] && continue
       group_label=" (group $group)"
     else
@@ -2597,6 +2791,8 @@ run_parallel_tasks() {
               mark_task_complete_markdown "$task"
             elif [[ "$PRD_SOURCE" == "yaml" ]]; then
               mark_task_complete_yaml "$task"
+            elif [[ "$PRD_SOURCE" == "json" ]]; then
+              mark_task_complete_json "$task"
             elif [[ "$PRD_SOURCE" == "github" ]]; then
               mark_task_complete_github "$task"
             fi
@@ -2646,7 +2842,7 @@ run_parallel_tasks() {
     # After each parallel_group completes, merge branches into integration branch
     # so the next group sees the completed work (fixes issue #13)
     # NOTE: Uses git branch instead of git checkout to avoid changing HEAD while worktrees are active (Greptile review)
-    if [[ "$PRD_SOURCE" == "yaml" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
+    if [[ "$PRD_SOURCE" == "yaml" || "$PRD_SOURCE" == "json" ]] && [[ ${#group_completed_branches[@]} -gt 0 ]] && [[ ${#groups[@]} -gt 1 ]]; then
       local integration_branch="ralphy/integration-group-$group"
       log_info "Creating integration branch for group $group: $integration_branch"
 
@@ -2721,6 +2917,19 @@ run_parallel_tasks() {
       for branch in "${completed_branches[@]}"; do
         echo "  ${CYAN}•${RESET} $branch"
       done
+    elif [[ "$NO_MERGE" == true ]]; then
+      # Keep branches as-is for manual follow-up.
+      echo "${BOLD}Auto-merge skipped (--no-merge). Branches kept:${RESET}"
+      for branch in "${completed_branches[@]}"; do
+        echo "  ${CYAN}•${RESET} $branch"
+      done
+      if [[ ${#integration_branches[@]} -gt 0 ]]; then
+        echo ""
+        echo "${BOLD}Integration branches kept:${RESET}"
+        for int_branch in "${integration_branches[@]}"; do
+          echo "  ${CYAN}•${RESET} $int_branch"
+        done
+      fi
     else
       # Auto-merge branches into ORIGINAL base branch (not integration branches)
       # This addresses Greptile review: final merge should use original base, not integration branch
@@ -2876,9 +3085,16 @@ Be careful to preserve functionality from BOTH branches. The goal is to integrat
                 ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
                 > "$resolve_tmpfile" 2>&1
               ;;
+            gemini)
+              gemini --output-format stream-json \
+                --yolo \
+                ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+                -p "$resolve_prompt" > "$resolve_tmpfile" 2>&1
+              ;;
             codex)
-              codex exec --full-auto \
+              codex exec --dangerously-bypass-approvals-and-sandbox \
                 --json \
+                ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
                 "$resolve_prompt" > "$resolve_tmpfile" 2>&1
               ;;
             *)
@@ -2993,8 +3209,23 @@ show_summary() {
 main() {
   parse_args "$@"
 
+  # Repeat options are only valid in single-task mode.
+  if [[ "$CONTINUE_ON_FAILURE" == true && "$REPEAT_FLAG_USED" != true && -n "$SINGLE_TASK" ]]; then
+    log_warn "--continue-on-failure has no effect without --repeat"
+  fi
+  if [[ "$REPEAT_FLAG_USED" == true || "$CONTINUE_ON_FAILURE" == true ]]; then
+    if [[ "$TASK_SOURCE_FLAG_USED" == true ]]; then
+      log_error "--repeat and --continue-on-failure cannot be used with --prd, --yaml, --json, or --github"
+      exit 1
+    fi
+    if [[ -z "$SINGLE_TASK" ]]; then
+      log_error "--repeat and --continue-on-failure require a task argument"
+      exit 1
+    fi
+  fi
+
   # Load browser setting from config (if not overridden by CLI flag)
-  if [[ "$BROWSER_ENABLED" == "auto" ]] && [[ -f "$CONFIG_FILE" ]]; then
+  if [[ "$BROWSER_FLAG_USED" != true ]] && [[ -f "$CONFIG_FILE" ]]; then
     BROWSER_ENABLED=$(load_browser_setting)
   fi
 
@@ -3031,6 +3262,7 @@ main() {
       qwen) command -v qwen &>/dev/null || { log_error "Qwen-Code CLI not found"; exit 1; } ;;
       droid) command -v droid &>/dev/null || { log_error "Factory Droid CLI not found"; exit 1; } ;;
       copilot) command -v copilot &>/dev/null || { log_error "GitHub Copilot CLI not found"; exit 1; } ;;
+      gemini) command -v gemini &>/dev/null || { log_error "Gemini CLI not found"; exit 1; } ;;
     esac
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -3049,6 +3281,7 @@ main() {
       qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
       droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
       copilot) engine_display="${BLUE}GitHub Copilot${RESET}" ;;
+      gemini) engine_display="${CYAN}Gemini CLI${RESET}" ;;
       *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
     esac
     echo "Engine: $engine_display"
@@ -3057,10 +3290,65 @@ main() {
     else
       echo "Config: ${DIM}none (run --init to configure)${RESET}"
     fi
+    if [[ "$REPEAT_COUNT" -gt 1 ]]; then
+      local repeat_mode_label="repeat:$REPEAT_COUNT"
+      if [[ "$CONTINUE_ON_FAILURE" == true ]]; then
+        repeat_mode_label="$repeat_mode_label continue-on-failure"
+      fi
+      echo "Mode: ${YELLOW}$repeat_mode_label${RESET}"
+    fi
     echo "${BOLD}============================================${RESET}"
 
-    run_brownfield_task "$SINGLE_TASK"
-    exit $?
+    local total="$REPEAT_COUNT"
+
+    # Dry-run: show prompt once, skip repeat iterations
+    if [[ "$DRY_RUN" == true ]]; then
+      run_brownfield_task "$SINGLE_TASK"
+      return $?
+    fi
+
+    local completed=0
+    local failed=0
+    local run_idx
+
+    for ((run_idx=1; run_idx<=total; run_idx++)); do
+      if [[ "$total" -gt 1 ]]; then
+        log_info "[$run_idx/$total] Executing: $SINGLE_TASK"
+      fi
+
+      if run_brownfield_task "$SINGLE_TASK"; then
+        ((completed++)) || true
+        continue
+      fi
+
+      ((failed++)) || true
+      if [[ "$LAST_TASK_FATAL" == true ]]; then
+        log_error "Aborting repeat loop due to fatal error."
+        break
+      fi
+      if [[ "$CONTINUE_ON_FAILURE" != true ]]; then
+        break
+      fi
+    done
+
+    if [[ "$total" -gt 1 ]]; then
+      local skipped=$(( total - completed - failed ))
+      local summary="Done: $completed succeeded, $failed failed"
+      [[ $skipped -gt 0 ]] && summary="$summary, $skipped skipped"
+      log_info "$summary of $total"
+      local skipped_suffix=""
+      [[ $skipped -gt 0 ]] && skipped_suffix=", $skipped skipped"
+      if [[ "$failed" -gt 0 ]]; then
+        notify_error "Repeated task finished: $completed/$total succeeded, $failed failed${skipped_suffix}"
+      else
+        notify_done "Repeated task completed: $completed/$total succeeded${skipped_suffix}"
+      fi
+    fi
+
+    if [[ "$failed" -gt 0 ]]; then
+      exit 1
+    fi
+    exit 0
   fi
 
   if [[ "$DRY_RUN" == true ]] && [[ "$MAX_ITERATIONS" -eq 0 ]]; then
@@ -3085,6 +3373,7 @@ main() {
     qwen) engine_display="${GREEN}Qwen-Code${RESET}" ;;
     droid) engine_display="${MAGENTA}Factory Droid${RESET}" ;;
     copilot) engine_display="${BLUE}GitHub Copilot${RESET}" ;;
+    gemini) engine_display="${CYAN}Gemini CLI${RESET}" ;;
     *) engine_display="${MAGENTA}Claude Code${RESET}" ;;
   esac
   echo "Engine: $engine_display"

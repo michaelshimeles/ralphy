@@ -31,6 +31,8 @@ export function createProgram(): Command {
 		.option("--copilot", "Use GitHub Copilot")
 		.option("--gemini", "Use Gemini CLI")
 		.option("--dry-run", "Show what would be done without executing")
+		.option("--repeat <n>", "Repeat single task N times")
+		.option("--continue-on-failure", "Continue repeat loop on task failure")
 		.option("--max-iterations <n>", "Maximum iterations (0 = unlimited)", "0")
 		.option("--max-retries <n>", "Maximum retries per task", "3")
 		.option("--retry-delay <n>", "Delay between retries in seconds", "5")
@@ -62,6 +64,11 @@ export function createProgram(): Command {
 	return program;
 }
 
+function resolveBrowserEnabled(flag: boolean | undefined): "true" | "false" {
+	if (flag === true) return "true";
+	return "false";
+}
+
 /**
  * Parse command line arguments into RuntimeOptions
  */
@@ -88,7 +95,33 @@ export function parseArgs(args: string[]): {
 	const opts = program.opts();
 	const [task] = program.args;
 
-	// Determine AI engine (--sonnet implies --claude)
+	// --prd has a commander default, so opts.prd alone cannot detect explicit usage
+	const taskSourceFlags = ["--prd", "--yaml", "--json", "--github"];
+	const hasExplicitTaskSourceFlag = ralphyArgs.some((arg) =>
+		taskSourceFlags.some((flag) => arg === flag || arg.startsWith(`${flag}=`)),
+	);
+
+	const repeatProvided = opts.repeat !== undefined;
+	const repeatCount = repeatProvided ? Number(opts.repeat) : 1;
+	if (repeatProvided && (!/^[1-9][0-9]*$/.test(opts.repeat) || repeatCount > 10_000)) {
+		throw new Error("--repeat must be an integer between 1 and 10000");
+	}
+
+	const continueOnFailure = opts.continueOnFailure || false;
+	if (continueOnFailure && !repeatProvided && task) {
+		console.warn("Warning: --continue-on-failure has no effect without --repeat");
+	}
+	const hasRepeatOptions = repeatProvided || continueOnFailure;
+	if (hasRepeatOptions && hasExplicitTaskSourceFlag) {
+		throw new Error(
+			"--repeat and --continue-on-failure cannot be used with --prd, --yaml, --json, or --github",
+		);
+	}
+	if (hasRepeatOptions && !task) {
+		throw new Error("--repeat and --continue-on-failure require a task argument");
+	}
+
+	// --sonnet implies --claude and takes priority over other engine flags
 	let aiEngine = "claude";
 	if (opts.sonnet) aiEngine = "claude";
 	else if (opts.opencode) aiEngine = "opencode";
@@ -140,6 +173,8 @@ export function parseArgs(args: string[]): {
 		maxIterations: Number.parseInt(opts.maxIterations, 10) || 0,
 		maxRetries: Number.parseInt(opts.maxRetries, 10) || 3,
 		retryDelay: Number.parseInt(opts.retryDelay, 10) || 5,
+		repeatCount,
+		continueOnFailure,
 		verbose: opts.verbose || false,
 		branchPerTask: opts.branchPerTask || false,
 		baseBranch: opts.baseBranch || "",
@@ -154,7 +189,7 @@ export function parseArgs(args: string[]): {
 		githubLabel: opts.githubLabel || "",
 		syncIssue: opts.syncIssue ? Number.parseInt(opts.syncIssue, 10) || undefined : undefined,
 		autoCommit: opts.commit !== false,
-		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
+		browserEnabled: resolveBrowserEnabled(opts.browser),
 		modelOverride,
 		skipMerge: opts.merge === false,
 		useSandbox: opts.sandbox || false,

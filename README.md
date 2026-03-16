@@ -28,7 +28,7 @@ cd ralphy && chmod +x ralphy.sh
 ./ralphy.sh --prd PRD.md
 ```
 
-Both versions have identical features. Examples below use `ralphy` (npm) - substitute `./ralphy.sh` if using the bash script.
+Examples below use `ralphy` (npm). Most commands also work with `./ralphy.sh`, but newer npm CLI features may land there first.
 
 ## Two Modes
 
@@ -36,6 +36,8 @@ Both versions have identical features. Examples below use `ralphy` (npm) - subst
 ```bash
 ralphy "add dark mode"
 ralphy "fix the auth bug"
+ralphy --repeat 3 "find and fix bugs"
+ralphy --repeat 5 --continue-on-failure "harden edge cases"
 ```
 
 **Task list** - work through a PRD:
@@ -319,6 +321,8 @@ ralphy --parallel --sandbox
 | `--max-retries N` | retries per task (default: 3) |
 | `--retry-delay N` | seconds between retries |
 | `--dry-run` | preview only |
+| `--repeat N` | repeat a single task N times (requires task argument) |
+| `--continue-on-failure` | in repeat mode, continue after non-fatal task failures |
 | `--browser` | enable browser automation |
 | `--no-browser` | disable browser automation |
 | `-v, --verbose` | debug output |
@@ -363,6 +367,7 @@ When an engine exits non-zero, ralphy includes the last lines of CLI output in t
 ## Changelog
 
 ### v4.7.2
+- **Single-task repeat mode**: added `--repeat <n>` with `--continue-on-failure` and fail-fast defaults; fatal errors still abort immediately
 - **Improved auth error detection**: simplified `extractAuthenticationError` function with better edge case handling (e.g., JSON dumps during login)
 - **Added project standards**: `CLAUDE.md`, `.cursorrules`, `CONTRIBUTING.md` for consistent AI-assisted development
 - **Enhanced default prompts**: enforce concise, focused code changes

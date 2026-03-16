@@ -58,7 +58,7 @@ async function runAgentInWorktree(
 	retryDelay: number,
 	skipTests: boolean,
 	skipLint: boolean,
-	browserEnabled: "auto" | "true" | "false",
+	browserEnabled: "true" | "false",
 	modelOverride?: string,
 	engineArgs?: string[],
 ): Promise<ParallelAgentResult> {
@@ -152,7 +152,7 @@ async function runAgentInSandbox(
 	retryDelay: number,
 	skipTests: boolean,
 	skipLint: boolean,
-	browserEnabled: "auto" | "true" | "false",
+	browserEnabled: "true" | "false",
 	modelOverride?: string,
 	engineArgs?: string[],
 ): Promise<ParallelAgentResult> {

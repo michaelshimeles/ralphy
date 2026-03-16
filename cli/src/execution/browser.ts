@@ -17,25 +17,20 @@ export function isAgentBrowserInstalled(): boolean {
 
 /**
  * Check if browser automation should be enabled
- * @param browserEnabled - CLI flag value: 'auto' | 'true' | 'false'
+ * @param browserEnabled - CLI flag value: 'true' | 'false'
  * @returns true if browser should be enabled
  */
-export function isBrowserAvailable(browserEnabled: "auto" | "true" | "false"): boolean {
-	if (browserEnabled === "false") {
+export function isBrowserAvailable(browserEnabled: "true" | "false"): boolean {
+	if (browserEnabled !== "true") {
 		return false;
 	}
 
-	if (browserEnabled === "true") {
-		if (!isAgentBrowserInstalled()) {
-			logWarn("--browser flag used but agent-browser CLI not found");
-			logWarn("Install from: https://agent-browser.dev");
-			return false;
-		}
-		return true;
+	if (!isAgentBrowserInstalled()) {
+		logWarn("--browser flag used but agent-browser CLI not found");
+		logWarn("Install from: https://agent-browser.dev");
+		return false;
 	}
-
-	// auto mode: check if available
-	return isAgentBrowserInstalled();
+	return true;
 }
 
 /**

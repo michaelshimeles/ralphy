@@ -7,7 +7,7 @@ interface PromptOptions {
 	task: string;
 	autoCommit?: boolean;
 	workDir?: string;
-	browserEnabled?: "auto" | "true" | "false";
+	browserEnabled?: "true" | "false";
 	skipTests?: boolean;
 	skipLint?: boolean;
 	prdFile?: string;
@@ -37,7 +37,7 @@ export function buildPrompt(options: PromptOptions): string {
 		task,
 		autoCommit = true,
 		workDir = process.cwd(),
-		browserEnabled = "auto",
+		browserEnabled = "false",
 		skipTests = false,
 		skipLint = false,
 		prdFile,
@@ -141,7 +141,7 @@ interface ParallelPromptOptions {
 	workDir?: string;
 	skipTests?: boolean;
 	skipLint?: boolean;
-	browserEnabled?: "auto" | "true" | "false";
+	browserEnabled?: "true" | "false";
 	allowCommit?: boolean;
 }
 
@@ -156,7 +156,7 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 		workDir = process.cwd(),
 		skipTests = false,
 		skipLint = false,
-		browserEnabled = "auto",
+		browserEnabled = "false",
 		allowCommit = true,
 	} = options;
 

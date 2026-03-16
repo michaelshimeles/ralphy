@@ -1,0 +1,35 @@
+# Example Tasks for Ralphy (YAML Format)
+#
+# Vorteile gegenueber Markdown:
+# - parallel_group: Kontrolliert, welche Tasks gleichzeitig laufen duerfen
+# - Strukturierte Daten fuer komplexere Workflows
+#
+# Nutzung: ./ralphy.sh --yaml tasks.example.yaml --parallel
+
+tasks:
+  # Gruppe 0: Setup (muss zuerst fertig sein)
+  - title: "Projekt-Setup: package.json erstellen mit TypeScript und Vitest"
+    completed: false
+    parallel_group: 0
+
+  # Gruppe 1: Kern-Funktionen (koennen parallel laufen)
+  - title: "Funktion schreiben, die Markdown-Headings (#, ##, ###) in HTML-Tags konvertiert"
+    completed: false
+    parallel_group: 1
+
+  - title: "Funktion schreiben, die **bold** und *italic* Text konvertiert"
+    completed: false
+    parallel_group: 1
+
+  - title: "Funktion schreiben, die Listen (- item) in HTML-Listen konvertiert"
+    completed: false
+    parallel_group: 1
+
+  # Gruppe 2: Integration (braucht Gruppe 1)
+  - title: "CLI-Entry-Point erstellen, der eine Datei einliest und konvertiert"
+    completed: false
+    parallel_group: 2
+
+  - title: "README.md mit Nutzungsanleitung schreiben"
+    completed: false
+    parallel_group: 2

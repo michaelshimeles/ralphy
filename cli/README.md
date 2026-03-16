@@ -24,6 +24,8 @@ ralphy --prd PRD.md
 ```bash
 ralphy "add dark mode"
 ralphy "fix the auth bug"
+ralphy --repeat 3 "find and fix bugs"
+ralphy --repeat 5 --continue-on-failure "harden edge cases"
 ```
 
 **Task list** - work through a PRD:
@@ -307,6 +309,8 @@ ralphy --parallel --sandbox
 | `--max-retries N` | retries per task (default: 3) |
 | `--retry-delay N` | seconds between retries |
 | `--dry-run` | preview only |
+| `--repeat N` | repeat a single task N times (requires task argument) |
+| `--continue-on-failure` | in repeat mode, continue after non-fatal task failures |
 | `--browser` | enable browser automation |
 | `--no-browser` | disable browser automation |
 | `-v, --verbose` | debug output |

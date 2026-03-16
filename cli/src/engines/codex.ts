@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { BaseAIEngine, execCommand, formatCommandError } from "./base.ts";
 import type { AIResult, EngineOptions } from "./types.ts";
@@ -17,7 +17,13 @@ export class CodexEngine extends BaseAIEngine {
 		const lastMessageFile = join(workDir, `.codex-last-message-${Date.now()}-${process.pid}.txt`);
 
 		try {
-			const args = ["exec", "--full-auto", "--json", "--output-last-message", lastMessageFile];
+			const args = [
+				"exec",
+				"--dangerously-bypass-approvals-and-sandbox", // replaces deprecated --full-auto; required for unattended execution
+				"--json",
+				"--output-last-message",
+				lastMessageFile,
+			];
 			if (options?.modelOverride) {
 				args.push("--model", options.modelOverride);
 			}
