@@ -179,7 +179,10 @@ Titles must be unique.
 ```bash
 ralphy --github owner/repo
 ralphy --github owner/repo --github-label "ready"
+ralphy --github owner/repo --github-label "task" --github-order 2,3,4,5,6
 ```
+
+Use `--github-order` to execute issues in a specific order. Without it, issues are processed in the order returned by the GitHub API (newest first). The flag takes comma-separated issue numbers — only those issues will be executed, in the exact order specified.
 
 ## Parallel Execution
 
@@ -300,6 +303,7 @@ ralphy --parallel --sandbox
 | `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
+| `--github-order 2,3,4` | execute issues in this order |
 | `--sync-issue N` | sync PRD progress to GitHub issue #N |
 | `--model NAME` | override model for any engine |
 | `--sonnet` | shortcut for `--claude --model sonnet` |

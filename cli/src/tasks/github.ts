@@ -25,9 +25,10 @@ export class GitHubTaskSource implements TaskSource {
 	private owner: string;
 	private repo: string;
 	private label?: string;
+	private order?: number[];
 	private cache: GitHubCache | null = null;
 
-	constructor(repoPath: string, label?: string) {
+	constructor(repoPath: string, label?: string, order?: number[]) {
 		// Parse owner/repo format
 		const [owner, repo] = repoPath.split("/");
 		if (!owner || !repo) {
@@ -37,6 +38,7 @@ export class GitHubTaskSource implements TaskSource {
 		this.owner = owner;
 		this.repo = repo;
 		this.label = label;
+		this.order = order;
 
 		// Use GITHUB_TOKEN from environment
 		this.octokit = new Octokit({
@@ -75,12 +77,34 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const tasks = issues.map((issue) => ({
+		let tasks = issues.map((issue) => ({
 			id: `${issue.number}:${issue.title}`,
 			title: issue.title,
 			body: issue.body || undefined,
 			completed: false,
 		}));
+
+		// Sort by specified order if provided
+		if (this.order && this.order.length > 0) {
+			const orderMap = new Map(this.order.map((num, idx) => [num, idx]));
+			const tagged = tasks.map((t) => ({
+				task: t,
+				issueNum: Number.parseInt(t.id.split(":")[0], 10),
+			}));
+			const filtered = tagged.filter(({ issueNum }) => orderMap.has(issueNum));
+
+			const foundNums = new Set(filtered.map(({ issueNum }) => issueNum));
+			const missing = this.order.filter((n) => !foundNums.has(n));
+			if (missing.length > 0) {
+				console.warn(
+					`[ralphy] Warning: --github-order specified issues not found among open issues: ${missing.join(", ")}`,
+				);
+			}
+
+			tasks = filtered
+				.sort((a, b) => orderMap.get(a.issueNum)! - orderMap.get(b.issueNum)!)
+				.map(({ task }) => task);
+		}
 
 		// Update cache (preserve closed count if we have it)
 		this.cache = {
@@ -139,7 +163,12 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const closedCount = issues.length;
+		// When order is specified, only count closed issues that are in the order list
+		let closedCount = issues.length;
+		if (this.order && this.order.length > 0) {
+			const orderSet = new Set(this.order);
+			closedCount = issues.filter((issue) => orderSet.has(issue.number)).length;
+		}
 
 		// Update cache with closed count
 		if (this.cache) {

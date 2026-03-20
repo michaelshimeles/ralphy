@@ -21,6 +21,8 @@ interface TaskSourceOptions {
 	repo?: string;
 	/** Label filter for GitHub source */
 	label?: string;
+	/** Ordered list of issue numbers to execute in sequence */
+	order?: number[];
 }
 
 /**
@@ -56,7 +58,7 @@ export function createTaskSource(options: TaskSourceOptions): TaskSource {
 			if (!options.repo) {
 				throw new Error("repo is required for github task source");
 			}
-			return new GitHubTaskSource(options.repo, options.label);
+			return new GitHubTaskSource(options.repo, options.label, options.order);
 
 		default:
 			throw new Error(`Unknown task source type: ${options.type}`);

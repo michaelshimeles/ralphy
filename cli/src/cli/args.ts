@@ -49,6 +49,7 @@ export function createProgram(): Command {
 		.option("--json <file>", "JSON task file")
 		.option("--github <repo>", "GitHub repo for issues (owner/repo)")
 		.option("--github-label <label>", "Filter GitHub issues by label")
+		.option("--github-order <issues>", "Execute GitHub issues in this order (comma-separated issue numbers, e.g. 2,3,4,5,6)")
 		.option("--sync-issue <number>", "Sync PRD file to GitHub issue body on each iteration")
 		.option("--no-commit", "Don't auto-commit changes")
 		.option("--browser", "Enable browser automation (agent-browser)")
@@ -152,6 +153,15 @@ export function parseArgs(args: string[]): {
 		prdIsFolder,
 		githubRepo: opts.github || "",
 		githubLabel: opts.githubLabel || "",
+		githubOrder: opts.githubOrder
+			? (() => {
+					const nums = opts.githubOrder
+						.split(",")
+						.map((n: string) => Number.parseInt(n.trim(), 10))
+						.filter((n: number) => !Number.isNaN(n));
+					return nums.length > 0 ? nums : undefined;
+				})()
+			: undefined,
 		syncIssue: opts.syncIssue ? Number.parseInt(opts.syncIssue, 10) || undefined : undefined,
 		autoCommit: opts.commit !== false,
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
