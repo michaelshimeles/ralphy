@@ -154,7 +154,10 @@ export function parseArgs(args: string[]): {
 		githubRepo: opts.github || "",
 		githubLabel: opts.githubLabel || "",
 		githubOrder: opts.githubOrder
-			? opts.githubOrder.split(",").map((n: string) => Number.parseInt(n.trim(), 10))
+			? opts.githubOrder
+					.split(",")
+					.map((n: string) => Number.parseInt(n.trim(), 10))
+					.filter((n: number) => !Number.isNaN(n))
 			: undefined,
 		syncIssue: opts.syncIssue ? Number.parseInt(opts.syncIssue, 10) || undefined : undefined,
 		autoCommit: opts.commit !== false,

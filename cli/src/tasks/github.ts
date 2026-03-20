@@ -156,7 +156,12 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const closedCount = issues.length;
+		// When order is specified, only count closed issues that are in the order list
+		let closedCount = issues.length;
+		if (this.order && this.order.length > 0) {
+			const orderSet = new Set(this.order);
+			closedCount = issues.filter((issue) => orderSet.has(issue.number)).length;
+		}
 
 		// Update cache with closed count
 		if (this.cache) {
