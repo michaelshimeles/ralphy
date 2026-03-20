@@ -25,9 +25,10 @@ export class GitHubTaskSource implements TaskSource {
 	private owner: string;
 	private repo: string;
 	private label?: string;
+	private order?: number[];
 	private cache: GitHubCache | null = null;
 
-	constructor(repoPath: string, label?: string) {
+	constructor(repoPath: string, label?: string, order?: number[]) {
 		// Parse owner/repo format
 		const [owner, repo] = repoPath.split("/");
 		if (!owner || !repo) {
@@ -37,6 +38,7 @@ export class GitHubTaskSource implements TaskSource {
 		this.owner = owner;
 		this.repo = repo;
 		this.label = label;
+		this.order = order;
 
 		// Use GITHUB_TOKEN from environment
 		this.octokit = new Octokit({
@@ -75,12 +77,27 @@ export class GitHubTaskSource implements TaskSource {
 			per_page: 100,
 		});
 
-		const tasks = issues.map((issue) => ({
+		let tasks = issues.map((issue) => ({
 			id: `${issue.number}:${issue.title}`,
 			title: issue.title,
 			body: issue.body || undefined,
 			completed: false,
 		}));
+
+		// Sort by specified order if provided
+		if (this.order && this.order.length > 0) {
+			const orderMap = new Map(this.order.map((num, idx) => [num, idx]));
+			tasks = tasks
+				.filter((t) => {
+					const issueNum = Number.parseInt(t.id.split(":")[0], 10);
+					return orderMap.has(issueNum);
+				})
+				.sort((a, b) => {
+					const aNum = Number.parseInt(a.id.split(":")[0], 10);
+					const bNum = Number.parseInt(b.id.split(":")[0], 10);
+					return (orderMap.get(aNum) ?? 0) - (orderMap.get(bNum) ?? 0);
+				});
+		}
 
 		// Update cache (preserve closed count if we have it)
 		this.cache = {

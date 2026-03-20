@@ -101,6 +101,8 @@ export interface RuntimeOptions {
 	githubRepo: string;
 	/** GitHub issue label filter */
 	githubLabel: string;
+	/** Ordered list of GitHub issue numbers to execute in sequence */
+	githubOrder?: number[];
 	/** GitHub issue number to sync PRD with on each iteration */
 	syncIssue?: number;
 	/** Auto-commit changes */

@@ -71,6 +71,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		filePath: options.prdFile,
 		repo: options.githubRepo,
 		label: options.githubLabel,
+		order: options.githubOrder,
 	});
 	const taskSource = new CachedTaskSource(innerTaskSource);
 
