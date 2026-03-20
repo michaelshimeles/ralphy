@@ -87,16 +87,23 @@ export class GitHubTaskSource implements TaskSource {
 		// Sort by specified order if provided
 		if (this.order && this.order.length > 0) {
 			const orderMap = new Map(this.order.map((num, idx) => [num, idx]));
-			tasks = tasks
-				.filter((t) => {
-					const issueNum = Number.parseInt(t.id.split(":")[0], 10);
-					return orderMap.has(issueNum);
-				})
-				.sort((a, b) => {
-					const aNum = Number.parseInt(a.id.split(":")[0], 10);
-					const bNum = Number.parseInt(b.id.split(":")[0], 10);
-					return (orderMap.get(aNum) ?? 0) - (orderMap.get(bNum) ?? 0);
-				});
+			const tagged = tasks.map((t) => ({
+				task: t,
+				issueNum: Number.parseInt(t.id.split(":")[0], 10),
+			}));
+			const filtered = tagged.filter(({ issueNum }) => orderMap.has(issueNum));
+
+			const foundNums = new Set(filtered.map(({ issueNum }) => issueNum));
+			const missing = this.order.filter((n) => !foundNums.has(n));
+			if (missing.length > 0) {
+				console.warn(
+					`[ralphy] Warning: --github-order specified issues not found among open issues: ${missing.join(", ")}`,
+				);
+			}
+
+			tasks = filtered
+				.sort((a, b) => orderMap.get(a.issueNum)! - orderMap.get(b.issueNum)!)
+				.map(({ task }) => task);
 		}
 
 		// Update cache (preserve closed count if we have it)
