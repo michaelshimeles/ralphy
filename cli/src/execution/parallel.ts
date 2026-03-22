@@ -3,7 +3,7 @@ import { join } from "node:path";
 import simpleGit from "simple-git";
 import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
-import type { AIEngine, AIResult } from "../engines/types.ts";
+import type { AIEngine, AIResult, TextStreamCallback } from "../engines/types.ts";
 import { getCurrentBranch, returnToBaseBranch } from "../git/branch.ts";
 import { syncPrdToIssue } from "../git/issue-sync.ts";
 import {
@@ -61,6 +61,7 @@ async function runAgentInWorktree(
 	browserEnabled: "auto" | "true" | "false",
 	modelOverride?: string,
 	engineArgs?: string[],
+	onText?: TextStreamCallback,
 ): Promise<ParallelAgentResult> {
 	let worktreeDir = "";
 	let branchName = "";
@@ -117,6 +118,15 @@ async function runAgentInWorktree(
 		};
 		const result = await withRetry(
 			async () => {
+				if (onText && engine.executeStreaming) {
+					return await engine.executeStreaming(
+						prompt,
+						worktreeDir,
+						() => {},
+						engineOptions,
+						onText,
+					);
+				}
 				const res = await engine.execute(prompt, worktreeDir, engineOptions);
 				if (!res.success && res.error && isRetryableError(res.error)) {
 					throw new Error(res.error);
@@ -155,6 +165,7 @@ async function runAgentInSandbox(
 	browserEnabled: "auto" | "true" | "false",
 	modelOverride?: string,
 	engineArgs?: string[],
+	onText?: TextStreamCallback,
 ): Promise<ParallelAgentResult> {
 	const uniqueSuffix = Math.random().toString(36).substring(2, 8);
 	const sandboxDir = join(sandboxBase, `agent-${agentNum}-${uniqueSuffix}`);
@@ -211,6 +222,9 @@ async function runAgentInSandbox(
 		};
 		const result = await withRetry(
 			async () => {
+				if (onText && engine.executeStreaming) {
+					return await engine.executeStreaming(prompt, sandboxDir, () => {}, engineOptions, onText);
+				}
 				const res = await engine.execute(prompt, sandboxDir, engineOptions);
 				if (!res.success && res.error && isRetryableError(res.error)) {
 					throw new Error(res.error);
@@ -267,6 +281,7 @@ export async function runParallel(
 		useSandbox = false,
 		engineArgs,
 		syncIssue,
+		streamOutput,
 	} = options;
 
 	const shouldFallbackToSandbox = (error: string | undefined): boolean => {
@@ -381,12 +396,17 @@ export async function runParallel(
 		// Run agents in parallel (using sandbox or worktree mode)
 		const promises = batch.map((task) => {
 			globalAgentNum++;
+			const agentNum = globalAgentNum;
+
+			const onText: TextStreamCallback | undefined = streamOutput
+				? (text) => process.stdout.write(`[agent ${agentNum}] ${text}`)
+				: undefined;
 
 			const runInSandbox = () =>
 				runAgentInSandbox(
 					engine,
 					task,
-					globalAgentNum,
+					agentNum,
 					getSandboxBase(workDir),
 					workDir,
 					prdSource,
@@ -399,6 +419,7 @@ export async function runParallel(
 					browserEnabled,
 					modelOverride,
 					engineArgs,
+					onText,
 				);
 
 			if (effectiveUseSandbox) {
@@ -408,7 +429,7 @@ export async function runParallel(
 			return runAgentInWorktree(
 				engine,
 				task,
-				globalAgentNum,
+				agentNum,
 				baseBranch,
 				isolationBase,
 				workDir,
@@ -422,9 +443,10 @@ export async function runParallel(
 				browserEnabled,
 				modelOverride,
 				engineArgs,
+				onText,
 			).then((res) => {
 				if (shouldFallbackToSandbox(res.error)) {
-					logWarn(`Agent ${globalAgentNum}: Worktree unavailable, retrying in sandbox mode.`);
+					logWarn(`Agent ${agentNum}: Worktree unavailable, retrying in sandbox mode.`);
 					if (res.worktreeDir) {
 						cleanupAgentWorktree(res.worktreeDir, res.branchName, workDir).catch(() => {
 							// Ignore cleanup failures during fallback
