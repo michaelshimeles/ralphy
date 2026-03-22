@@ -4,10 +4,11 @@ import {
 	detectStepFromOutput,
 	execCommand,
 	execCommandStreaming,
+	extractAssistantTextFromStreamJson,
 	formatCommandError,
 	parseStreamJsonResult,
 } from "./base.ts";
-import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
+import type { AIResult, EngineOptions, ProgressCallback, TextStreamCallback } from "./types.ts";
 
 const isWindows = process.platform === "win32";
 
@@ -87,6 +88,7 @@ export class ClaudeEngine extends BaseAIEngine {
 		workDir: string,
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
+		onText?: TextStreamCallback,
 	): Promise<AIResult> {
 		const args = ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"];
 		if (options?.modelOverride) {
@@ -120,6 +122,14 @@ export class ClaudeEngine extends BaseAIEngine {
 				const step = detectStepFromOutput(line);
 				if (step) {
 					onProgress(step);
+				}
+
+				// Stream assistant text to callback
+				if (onText) {
+					const text = extractAssistantTextFromStreamJson(line);
+					if (text) {
+						onText(text);
+					}
 				}
 			},
 			undefined,

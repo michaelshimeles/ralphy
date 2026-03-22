@@ -49,6 +49,7 @@ export interface AIEngine {
 		workDir: string,
 		onProgress: ProgressCallback,
 		options?: EngineOptions,
+		onText?: TextStreamCallback,
 	): Promise<AIResult>;
 }
 
