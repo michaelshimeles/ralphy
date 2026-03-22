@@ -20,6 +20,7 @@ export function buildActiveSettings(options: RuntimeOptions): string[] {
 	if (options.createPr) activeSettings.push("pr");
 	if (options.parallel) activeSettings.push("parallel");
 	if (!options.autoCommit) activeSettings.push("no-commit");
+	if (options.streamOutput) activeSettings.push("stream");
 
 	return activeSettings;
 }

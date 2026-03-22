@@ -40,6 +40,8 @@ export interface ExecutionOptions {
 	engineArgs?: string[];
 	/** GitHub issue number to sync PRD with on each iteration */
 	syncIssue?: number;
+	/** Stream raw AI output to stdout */
+	streamOutput?: boolean;
 }
 
 export interface ExecutionResult {
@@ -73,6 +75,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		modelOverride,
 		engineArgs,
 		syncIssue,
+		streamOutput,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -150,6 +153,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 									spinner.updateStep(step);
 								},
 								engineOptions,
+								streamOutput ? (text) => process.stdout.write(text) : undefined,
 							);
 						}
 

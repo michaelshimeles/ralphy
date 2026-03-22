@@ -115,6 +115,8 @@ export interface RuntimeOptions {
 	useSandbox?: boolean;
 	/** Additional arguments to pass to the engine CLI */
 	engineArgs?: string[];
+	/** Stream raw AI output to stdout */
+	streamOutput: boolean;
 }
 
 /**
@@ -142,4 +144,5 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	githubLabel: "",
 	autoCommit: true,
 	browserEnabled: "auto",
+	streamOutput: false,
 };

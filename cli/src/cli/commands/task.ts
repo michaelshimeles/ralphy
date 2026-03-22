@@ -82,6 +82,7 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 							spinner.updateStep(step);
 						},
 						engineOptions,
+						options.streamOutput ? (text) => process.stdout.write(text) : undefined,
 					);
 				}
 

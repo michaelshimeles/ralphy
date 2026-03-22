@@ -139,6 +139,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
 			syncIssue: options.syncIssue,
+			streamOutput: options.streamOutput,
 		});
 	} else {
 		result = await runSequential({
@@ -163,6 +164,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
 			syncIssue: options.syncIssue,
+			streamOutput: options.streamOutput,
 		});
 	}
 
