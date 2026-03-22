@@ -345,6 +345,41 @@ export async function execCommandStreaming(
 }
 
 /**
+ * Extract assistant text from a stream-json line.
+ * Parses lines with type "assistant" and extracts text from message.content array.
+ * Returns concatenated text or null if the line is not an assistant text message.
+ */
+export function extractAssistantTextFromStreamJson(line: string): string | null {
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("{")) {
+		return null;
+	}
+
+	try {
+		const parsed = JSON.parse(trimmed);
+		if (parsed.type !== "assistant") {
+			return null;
+		}
+
+		const content = parsed.message?.content;
+		if (!Array.isArray(content)) {
+			return null;
+		}
+
+		const texts: string[] = [];
+		for (const item of content) {
+			if (item.type === "text" && typeof item.text === "string") {
+				texts.push(item.text);
+			}
+		}
+
+		return texts.length > 0 ? texts.join("") : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Check if a file path looks like a test file
  */
 function isTestFile(filePath: string): boolean {

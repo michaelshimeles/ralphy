@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	checkForErrors,
+	extractAssistantTextFromStreamJson,
 	extractAuthenticationError,
 	formatCommandError,
 	parseStreamJsonResult,
@@ -219,6 +220,108 @@ describe("extractAuthenticationError", () => {
 		const error = extractAuthenticationError(output);
 
 		expect(error).toBeNull();
+	});
+});
+
+describe("extractAssistantTextFromStreamJson", () => {
+	it("should extract text from assistant message with content array", () => {
+		const line = `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBe("Hello world");
+	});
+
+	it("should concatenate multiple text items in content array", () => {
+		const line = `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello "},{"type":"text","text":"world"}]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBe("Hello world");
+	});
+
+	it("should skip non-text content items", () => {
+		const line = `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"123"},{"type":"text","text":"Some text"}]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBe("Some text");
+	});
+
+	it("should return null for non-assistant type lines", () => {
+		const line = `{"type":"result","result":"Done"}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should return null for system type lines", () => {
+		const line = `{"type":"system","subtype":"init","model":"claude"}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should return null for error type lines", () => {
+		const line = `{"type":"error","error":{"message":"Something failed"}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should return null for assistant lines without content array", () => {
+		const line = `{"type":"assistant","message":{"tool":"read","name":"file.ts"}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should return null for content array with no text items", () => {
+		const line = `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"123"}]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should return null for non-JSON lines", () => {
+		expect(extractAssistantTextFromStreamJson("plain text")).toBeNull();
+		expect(extractAssistantTextFromStreamJson("")).toBeNull();
+		expect(extractAssistantTextFromStreamJson("  ")).toBeNull();
+	});
+
+	it("should return null for malformed JSON", () => {
+		const result = extractAssistantTextFromStreamJson("{invalid json}");
+
+		expect(result).toBeNull();
+	});
+
+	it("should handle empty content array", () => {
+		const line = `{"type":"assistant","message":{"content":[]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBeNull();
+	});
+
+	it("should handle text with special characters", () => {
+		const line = `{"type":"assistant","message":{"content":[{"type":"text","text":"Line 1\\nLine 2\\ttab"}]}}`;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBe("Line 1\nLine 2\ttab");
+	});
+
+	it("should handle whitespace-padded lines", () => {
+		const line = `  {"type":"assistant","message":{"content":[{"type":"text","text":"trimmed"}]}}  `;
+
+		const result = extractAssistantTextFromStreamJson(line);
+
+		expect(result).toBe("trimmed");
 	});
 });
 
