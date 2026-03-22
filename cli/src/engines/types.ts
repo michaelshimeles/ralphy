@@ -27,6 +27,11 @@ export interface EngineOptions {
 export type ProgressCallback = (step: string) => void;
 
 /**
+ * Callback for streaming raw text output from engine execution
+ */
+export type TextStreamCallback = (text: string) => void;
+
+/**
  * AI Engine interface - one per AI tool
  */
 export interface AIEngine {
