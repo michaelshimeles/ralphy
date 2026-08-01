@@ -89,6 +89,14 @@ ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
 ralphy --gemini     # Gemini CLI
+ralphy --minimax    # MiniMax through Claude Code
+```
+
+The MiniMax engine uses `MiniMax-M3` by default. Set its API key before running it:
+
+```bash
+export MINIMAX_API_KEY="..."
+ralphy --minimax "add feature"
 ```
 
 ### Model Override
@@ -355,6 +363,7 @@ ralphy --parallel --sandbox
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `--yolo` | tokens |
 | Gemini | `gemini` | `--yolo` | tokens + cost |
+| MiniMax | `claude` | `--dangerously-skip-permissions` | tokens + cost |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 

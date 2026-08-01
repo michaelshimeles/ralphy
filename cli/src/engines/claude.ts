@@ -18,10 +18,19 @@ export class ClaudeEngine extends BaseAIEngine {
 	name = "Claude Code";
 	cliCommand = "claude";
 
+	protected getModel(options?: EngineOptions): string | undefined {
+		return options?.modelOverride;
+	}
+
+	protected getEnvironment(_options?: EngineOptions): Record<string, string> | undefined {
+		return undefined;
+	}
+
 	async execute(prompt: string, workDir: string, options?: EngineOptions): Promise<AIResult> {
 		const args = ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"];
-		if (options?.modelOverride) {
-			args.push("--model", options.modelOverride);
+		const model = this.getModel(options);
+		if (model) {
+			args.push("--model", model);
 		}
 		// Add any additional engine-specific arguments
 		if (options?.engineArgs && options.engineArgs.length > 0) {
@@ -42,7 +51,7 @@ export class ClaudeEngine extends BaseAIEngine {
 			this.cliCommand,
 			args,
 			workDir,
-			undefined,
+			this.getEnvironment(options),
 			stdinContent,
 		);
 
@@ -89,8 +98,9 @@ export class ClaudeEngine extends BaseAIEngine {
 		options?: EngineOptions,
 	): Promise<AIResult> {
 		const args = ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"];
-		if (options?.modelOverride) {
-			args.push("--model", options.modelOverride);
+		const model = this.getModel(options);
+		if (model) {
+			args.push("--model", model);
 		}
 		// Add any additional engine-specific arguments
 		if (options?.engineArgs && options.engineArgs.length > 0) {
@@ -122,7 +132,7 @@ export class ClaudeEngine extends BaseAIEngine {
 					onProgress(step);
 				}
 			},
-			undefined,
+			this.getEnvironment(options),
 			stdinContent,
 		);
 
