@@ -77,7 +77,28 @@ ralphy --qwen       # Qwen-Code
 ralphy --droid      # Factory Droid
 ralphy --copilot    # GitHub Copilot
 ralphy --gemini     # Gemini CLI
+ralphy --minimax    # MiniMax through Claude Code
 ```
+
+The MiniMax engine uses `MiniMax-M3` by default and talks to the
+Anthropic-compatible MiniMax endpoint. Set its API key before running it:
+
+```bash
+export MINIMAX_API_KEY="..."
+ralphy --minimax "add feature"
+```
+
+MiniMax is available on two platforms with separate hosts. Pick one with
+`MINIMAX_REGION` (defaults to `global_en`):
+
+```bash
+export MINIMAX_REGION="global_en"   # https://api.minimax.io/anthropic
+export MINIMAX_REGION="cn_zh"       # https://api.minimaxi.com/anthropic
+```
+
+`MINIMAX_BASE_URL` overrides the region when you need a custom or proxied
+endpoint. Use `--model` to select another MiniMax model, for example
+`ralphy --minimax --model MiniMax-M2.7 "add feature"`.
 
 ### Model Override
 
@@ -343,6 +364,7 @@ ralphy --parallel --sandbox
 | Droid | `droid exec` | `--auto medium` | duration |
 | Copilot | `copilot` | `--yolo` | tokens |
 | Gemini | `gemini` | `--yolo` | tokens + cost |
+| MiniMax | `claude` | `--dangerously-skip-permissions` | tokens + cost |
 
 When an engine exits non-zero, ralphy includes the last lines of CLI output in the error message to make debugging easier.
 
