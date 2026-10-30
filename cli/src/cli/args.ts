@@ -30,6 +30,7 @@ export function createProgram(): Command {
 		.option("--droid", "Use Factory Droid")
 		.option("--copilot", "Use GitHub Copilot")
 		.option("--gemini", "Use Gemini CLI")
+		.option("--minimax", "Use MiniMax through Claude Code")
 		.option("--dry-run", "Show what would be done without executing")
 		.option("--max-iterations <n>", "Maximum iterations (0 = unlimited)", "0")
 		.option("--max-retries <n>", "Maximum retries per task", "3")
@@ -98,6 +99,7 @@ export function parseArgs(args: string[]): {
 	else if (opts.droid) aiEngine = "droid";
 	else if (opts.copilot) aiEngine = "copilot";
 	else if (opts.gemini) aiEngine = "gemini";
+	else if (opts.minimax) aiEngine = "minimax";
 
 	// Determine model override (--sonnet is shortcut for --model sonnet)
 	const modelOverride = opts.sonnet ? "sonnet" : opts.model || undefined;
