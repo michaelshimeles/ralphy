@@ -60,7 +60,7 @@ describe("MiniMax region resolution", () => {
 	it("exposes an endpoint for every supported region", () => {
 		expect(MINIMAX_REGION_BASE_URLS).toEqual({
 			global_en: "https://api.minimax.io/anthropic",
-			cn_zh: "https://api.minimax.cn/anthropic",
+			cn_zh: "https://api.minimaxi.com/anthropic",
 		});
 	});
 
@@ -72,7 +72,7 @@ describe("MiniMax region resolution", () => {
 
 	it("selects the CN endpoint when the CN region is configured", () => {
 		expect(resolveMiniMaxBaseUrl({ MINIMAX_REGION: "cn_zh" })).toBe(
-			"https://api.minimax.cn/anthropic",
+			"https://api.minimaxi.com/anthropic",
 		);
 	});
 
@@ -203,7 +203,7 @@ describe("MiniMaxEngine", () => {
 
 		await new MiniMaxEngine().execute("test", process.cwd());
 
-		expect(captured.env?.ANTHROPIC_BASE_URL).toBe("https://api.minimax.cn/anthropic");
+		expect(captured.env?.ANTHROPIC_BASE_URL).toBe("https://api.minimaxi.com/anthropic");
 
 		spy.mockRestore();
 	});
@@ -242,7 +242,7 @@ describe("MiniMaxEngine", () => {
 
 		await new MiniMaxEngine().executeStreaming("test", process.cwd(), () => {});
 
-		expect(capturedEnv?.ANTHROPIC_BASE_URL).toBe("https://api.minimax.cn/anthropic");
+		expect(capturedEnv?.ANTHROPIC_BASE_URL).toBe("https://api.minimaxi.com/anthropic");
 		expect(capturedEnv?.ANTHROPIC_AUTH_TOKEN).toBe("test-key");
 
 		spy.mockRestore();

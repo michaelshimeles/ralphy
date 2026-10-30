@@ -105,7 +105,7 @@ MiniMax is available on two platforms with separate hosts. Pick one with
 
 ```bash
 export MINIMAX_REGION="global_en"   # https://api.minimax.io/anthropic
-export MINIMAX_REGION="cn_zh"       # https://api.minimax.cn/anthropic
+export MINIMAX_REGION="cn_zh"       # https://api.minimaxi.com/anthropic
 ```
 
 `MINIMAX_BASE_URL` overrides the region when you need a custom or proxied

@@ -11,7 +11,7 @@ const DEFAULT_MODEL = "MiniMax-M3.1-Flash";
  */
 export const MINIMAX_REGION_BASE_URLS = {
 	global_en: "https://api.minimax.io/anthropic",
-	cn_zh: "https://api.minimax.cn/anthropic",
+	cn_zh: "https://api.minimaxi.com/anthropic",
 } as const;
 
 export type MiniMaxRegion = keyof typeof MINIMAX_REGION_BASE_URLS;
